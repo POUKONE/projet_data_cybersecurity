@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+streamlit
+pandas
+numpy
+scikit-learn
+python-nmap
+requests
+beautifulsoup4
+scapy
+cryptography
+sqlalchemy
+plotly
+pytest
+python-dotenv
