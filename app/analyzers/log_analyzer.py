@@ -1,220 +1,260 @@
-import pandas as pd 
-
 import pandas as pd
 
 
-def logs_to_dataframe(parsed_logs: list[dict]) -> pd.DataFrame:
+def logs_to_dataframe(
+    parsed_logs: list[dict]
+) -> pd.DataFrame:
     """
-    Convertit une liste de logs parsés en DataFrame Pandas.
+    Transforme une liste de logs parsés
+    en DataFrame Pandas.
 
-    Paramètre
-    ---------
+    Paramètres
+    ----------
     parsed_logs : list[dict]
-        Liste des événements déjà structurés par log_parser.py.
+        Logs déjà transformés en dictionnaires.
 
     Retour
     ------
     pd.DataFrame
-        DataFrame contenant les événements.
+        DataFrame contenant les logs structurés.
     """
 
     # Création du DataFrame.
     df = pd.DataFrame(parsed_logs)
 
-    # Si aucun log n'est présent, on retourne directement
-    # le DataFrame vide.
+    # Si aucune donnée n'est disponible,
+    # on retourne directement le DataFrame vide.
     if df.empty:
         return df
 
-    # Conversion du timestamp texte en vrai type datetime.
-    # Cela nous permettra ensuite de faire des calculs temporels.
+    # Conversion du timestamp en datetime.
     df["timestamp"] = pd.to_datetime(
         df["timestamp"],
         errors="coerce"
     )
 
-    # Suppression éventuelle des lignes dont le timestamp
-    # n'a pas pu être converti.
-    df = df.dropna(subset=["timestamp"])
+    # Suppression des lignes dont
+    # le timestamp est invalide.
+    df = df.dropna(
+        subset=["timestamp"]
+    )
 
     return df
 
-def get_failed_logins(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Retourne uniquement les tentatives de connexion échouées.
-
-    Paramètre
-    ---------
-    df : pd.DataFrame
-        DataFrame contenant les logs.
-
-    Retour
-    ------
-    pd.DataFrame
-        Sous-ensemble contenant uniquement status=FAILED.
-    """
-
-    # Si le DataFrame est vide, inutile de continuer.
-    if df.empty:
-        return df
-
-    # Sélection des lignes où le statut vaut FAILED.
-    failed_logins = df[
-        df["status"].str.upper() == "FAILED"
-    ].copy()
-
-    return failed_logins
-
-def count_failed_logins_by_ip(
-    df: pd.DataFrame
-) -> pd.DataFrame:
-    """
-    Compte le nombre de connexions échouées par adresse IP.
-
-    Retour
-    ------
-    pd.DataFrame
-        Tableau avec :
-        ip_address
-        failed_attempts
-    """
-
-    # On récupère uniquement les échecs.
-    failed_logins = get_failed_logins(df)
-
-    if failed_logins.empty:
-        return pd.DataFrame(
-            columns=["ip_address", "failed_attempts"]
-        )
-
-    # groupby() regroupe les événements par IP.
-    #
-    # size() compte le nombre de lignes dans chaque groupe.
-    result = (
-        failed_logins
-        .groupby("ip_address")
-        .size()
-        .reset_index(name="failed_attempts")
-    )
-
-    # Tri décroissant pour afficher les IP
-    # les plus suspectes en premier.
-    result = result.sort_values(
-        by="failed_attempts",
-        ascending=False
-    )
-
-    return result
-
-def detect_suspicious_ips(
+def detect_failed_login_bursts(
     df: pd.DataFrame,
-    threshold: int = 3
-) -> pd.DataFrame:
+    threshold: int = 5,
+    window_minutes: int = 5
+) -> list[dict]:
     """
-    Détecte les adresses IP dépassant un seuil
-    de tentatives de connexion échouées.
+    Détecte plusieurs tentatives de connexion échouées
+    provenant d'une même adresse IP dans une courte période.
+
+    Exemple :
+        threshold = 5
+        window_minutes = 5
+
+    signifie :
+        au moins 5 échecs depuis la même IP
+        dans une fenêtre de 5 minutes.
 
     Paramètres
     ----------
     df : pd.DataFrame
-        Logs analysés.
+        DataFrame contenant les logs structurés.
 
     threshold : int
-        Nombre minimal d'échecs pour considérer
-        une IP comme suspecte.
+        Nombre minimal d'échecs nécessaires
+        pour considérer l'activité comme suspecte.
+
+    window_minutes : int
+        Durée maximale de la fenêtre temporelle.
 
     Retour
     ------
-    pd.DataFrame
-        IP suspectes et nombre d'échecs.
+    list[dict]
+        Liste des comportements suspects détectés.
     """
 
-    failed_by_ip = count_failed_logins_by_ip(df)
+    # Si le DataFrame est vide, il n'y a rien à analyser.
+    if df.empty:
+        return []
 
-    if failed_by_ip.empty:
-        return failed_by_ip
+    # Vérification de la présence des colonnes nécessaires.
+    required_columns = {
+        "timestamp",
+        "status",
+        "ip_address",
+        "username"
+    }
 
-    # On conserve uniquement les IP dont le nombre
-    # d'échecs est supérieur ou égal au seuil.
-    suspicious_ips = failed_by_ip[
-        failed_by_ip["failed_attempts"] >= threshold
+    # On calcule les colonnes manquantes.
+    missing_columns = required_columns - set(df.columns)
+
+    # Si certaines colonnes sont absentes,
+    # l'analyse ne peut pas être effectuée correctement.
+    if missing_columns:
+        raise ValueError(
+            f"Colonnes manquantes : {missing_columns}"
+        )
+
+    # On travaille sur une copie afin de ne pas modifier
+    # le DataFrame original.
+    working_df = df.copy()
+
+    # Conversion de la colonne timestamp en datetime.
+    # errors='coerce' transforme les dates invalides en NaT.
+    working_df["timestamp"] = pd.to_datetime(
+        working_df["timestamp"],
+        errors="coerce"
+    )
+
+    # Suppression des lignes avec timestamp invalide.
+    working_df = working_df.dropna(
+        subset=["timestamp"]
+    )
+
+    # On ne garde que les événements dont
+    # le statut correspond à FAILED.
+    failed_logins = working_df[
+        working_df["status"].str.upper() == "FAILED"
     ].copy()
 
-    return suspicious_ips
+    # S'il n'y a aucun échec, on retourne une liste vide.
+    if failed_logins.empty:
+        return []
 
-def get_log_statistics(df: pd.DataFrame) -> dict:
-    """
-    Calcule quelques statistiques générales
-    sur les logs.
-
-    Retour
-    ------
-    dict
-        Statistiques utiles pour le dashboard.
-    """
-
-    if df.empty:
-        return {
-            "total_events": 0,
-            "failed_logins": 0,
-            "successful_logins": 0,
-            "unique_ips": 0,
-            "unique_users": 0
-        }
-
-    total_events = len(df)
-
-    failed_logins = len(
-        df[df["status"].str.upper() == "FAILED"]
+    # On trie chronologiquement les logs.
+    failed_logins = failed_logins.sort_values(
+        by="timestamp"
     )
 
-    successful_logins = len(
-        df[df["status"].str.upper() == "SUCCESS"]
-    )
+    # Cette liste contiendra les comportements suspects.
+    detections = []
 
-    unique_ips = df["ip_address"].nunique()
+    # On analyse chaque adresse IP indépendamment.
+    for ip_address, group in failed_logins.groupby("ip_address"):
 
-    unique_users = df["username"].nunique()
+        # Tri des événements de cette IP.
+        group = group.sort_values(
+            by="timestamp"
+        ).reset_index(drop=True)
 
-    return {
-        "total_events": total_events,
-        "failed_logins": failed_logins,
-        "successful_logins": successful_logins,
-        "unique_ips": unique_ips,
-        "unique_users": unique_users
-    }
+        # On parcourt chaque événement comme point
+        # de départ potentiel d'une fenêtre temporelle.
+        for start_index in range(len(group)):
+
+            # Timestamp de départ.
+            start_time = group.loc[
+                start_index,
+                "timestamp"
+            ]
+
+            # Timestamp de fin théorique.
+            end_limit = start_time + pd.Timedelta(
+                minutes=window_minutes
+            )
+
+            # On récupère les événements qui se trouvent
+            # dans cette fenêtre temporelle.
+            window = group[
+                (group["timestamp"] >= start_time)
+                &
+                (group["timestamp"] <= end_limit)
+            ]
+
+            # Si le nombre d'échecs atteint le seuil,
+            # on considère ce comportement comme suspect.
+            if len(window) >= threshold:
+
+                # Liste des utilisateurs ciblés.
+                targeted_users = (
+                    window["username"]
+                    .dropna()
+                    .unique()
+                    .tolist()
+                )
+
+                # On construit une détection structurée.
+                detection = {
+                    "event_type": "FAILED_LOGIN_BURST",
+                    "ip_address": ip_address,
+                    "failed_attempts": len(window),
+                    "start_time": start_time,
+                    "end_time": window["timestamp"].max(),
+                    "targeted_users": targeted_users
+                }
+
+                detections.append(detection)
+
+                # On arrête après la première détection
+                # pour éviter de générer plusieurs alertes
+                # similaires pour la même IP.
+                break
+
+    return detections
+
+
 if __name__ == "__main__":
 
     from app.collectors.log_collector import read_log_file
     from app.parsers.log_parser import parse_log_lines
 
-    # 1. Lecture du fichier.
+    # Lecture.
     lines = read_log_file(
         "data/raw/sample.log"
     )
 
-    # 2. Parsing.
+    # Parsing.
     parsed_logs = parse_log_lines(lines)
 
-    # 3. Transformation en DataFrame.
-    df = logs_to_dataframe(parsed_logs)
-
-    print("\n--- DataFrame ---")
-    print(df)
-
-    # 4. Statistiques.
-    stats = get_log_statistics(df)
-
-    print("\n--- Statistiques ---")
-
-    for key, value in stats.items():
-        print(f"{key}: {value}")
-
-    # 5. IP suspectes.
-    suspicious_ips = detect_suspicious_ips(
-        df,
-        threshold=3
+    # Transformation en DataFrame.
+    df = logs_to_dataframe(
+        parsed_logs
     )
 
-    print("\n--- IP suspectes ---")
-    print(suspicious_ips)
+    # Détection.
+    burst_detections = detect_failed_login_bursts(
+        df,
+        threshold=5,
+        window_minutes=5
+    )
+
+    print(
+        "\n--- Tentatives suspectes détectées ---"
+    )
+
+    if not burst_detections:
+        print(
+            "Aucune activité suspecte détectée."
+        )
+
+    for detection in burst_detections:
+
+        print(
+            f"IP : {detection['ip_address']}"
+        )
+
+        print(
+            f"Nombre d'échecs : "
+            f"{detection['failed_attempts']}"
+        )
+
+        print(
+            f"Début : {detection['start_time']}"
+        )
+
+        print(
+            f"Fin : {detection['end_time']}"
+        )
+
+        print(
+            f"Utilisateurs ciblés : "
+            f"{detection['targeted_users']}"
+        )
+
+        print(
+            f"Type : {detection['event_type']}"
+        )
+
+        print("-" * 40)
