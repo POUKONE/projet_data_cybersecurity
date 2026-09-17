@@ -4,115 +4,30 @@ import streamlit as st
 # Configuration globale de l'application
 st.set_page_config(page_title="Dashboard d'analyse de données et Cybersécurité", layout="wide")
 
-# Menu de navigation 
-st.sidebar.title("Menu de Navigation")
+# affichage d'un en-tête dans la sidebar
+st.sidebar.title(" Dashboard")
+st.sidebar.markdown("---")
 
 # Définitions des pages pour la barre de navigation
-pages = [
-    "1. Acceuil",
-    "2. Vue d'ensemble & KPI",
-    "3. Analyse Réseau",
-    "4. Analyse des Logs",
-    "5. Audit Web",
-    "6. Alertes",
-    "7. Machine Learning & detection d'anomalies"
-]
+page_acceuil = st.Page("pages/acceuil.py", title="Acceuil", icon="🏠")
+page_kpi = st.Page("pages/kpi.py", title="KPI", icon="📊")
+page_network = st.Page("pages/network.py", title="Réseau", icon="🌐")
+page_logs = st.Page("pages/logs.py", title="Logs", icon="📝")
+page_web = st.Page("pages/audit_web.py", title="Web", icon="💻")
+page_alertes = st.Page("pages/alertes.py", title="Alertes", icon="🔔")
+page_ml = st.Page("pages/ml.py", title="ML", icon="🧠")
 
-# Choix de la page affiché
-choix_page = st.sidebar.selectbox("Choisissez une page", pages)
-
-# =========================== PAGE 1 : Page d'accueil ===========================
-if choix_page == "1. Acceuil":
-    st.title("Page d'accueil")
-    st.markdown(
-        """
-        TODO: Ajouter toute les information liées au projet de tels sorte que la page d'acceuil
-        soit comme une page explicative et d'introduction pour l'utilisateur.
-        """
-    )
-
-# =========================== PAGE 2: Vue d'ensemble & KPI ===========================
-elif choix_page == "2. Vue d'ensemble & KPI":
-    st.title("Vue d'ensemble & KPI")
-    st.markdown(
-        """
-    ### Ici on va afficher : 
-    - Score global de sécurité.
-    - Nombre de machines surveillées.
-    - Nombre d’événements analysés.
-    - Nombre d’alertes actives et critiques.
-    - Nombre d’anomalies détectées.
-    Évolution temporelle des alertes.
-    Top des alertes et des machines à risque.
-    """
-    )
+# Création de la barre de navigation
+pg_manager = st.navigation([
+    page_acceuil,
+    page_kpi,
+    page_network,
+    page_logs,
+    page_web,
+    page_alertes,
+    page_ml
+])
 
 
-# =========================== PAGE 3: Analyse Réseau ===========================
-elif choix_page == "3. Analyse Réseau":
-    st.title("Analyse Réseau")
-    st.markdown(
-        """
-    ### Ici on va afficher : 
-    - Liste des machines, IP et statut.
-    - Ports et services ouverts.
-    - Date du dernier scan.
-    - Score de risque par machine.
-    - Changements entre deux scans.
-    """
-    )
-
-
-# =========================== PAGE 4: Analyse des logs ===========================
-elif choix_page == "4. Analyse des Logs":
-    st.title("Analyse des Logs")
-    st.markdown(
-        """
-    ### Ici on va afficher : 
-    - Volume d’événements.
-    - Connexions réussies et échouées.
-    - Événements par heure ou par jour.
-    - Utilisateurs et IP les plus actifs.
-    - Événements suspects et répétitions.
-    """
-    )
-
-
-# =========================== PAGE 5: Audit Web ===========================
-elif choix_page == "5. Audit Web":
-    st.title("Audit Web")
-    st.markdown(
-        """
-    ### Ici on va afficher : 
-    - URL analysée et disponibilité.
-    - HTTPS et temps de réponse.
-    - HSTS, CSP, X-Frame-Options et cookies.
-    - Score de sécurité web.
-    - Recommandations associées
-    """
-    )
-
-
-# =========================== PAGE 6: Alertes ===========================
-elif choix_page == "6. Alertes":
-    st.title("Alertes")
-    st.markdown(
-        """
-    ### Ici on va afficher : 
-    Le tableau des alertes, avec une possibilité de filtrer les alertes par période, source, machine, niveau de risque et statut.
-    """
-    )
-
-
-# =========================== PAGE 7: Machine Learning & detection d'anomalies ===========================
-elif choix_page == "7. Machine Learning & detection d'anomalies":
-    st.title("Machine Learning & detection d'anomalies")
-    st.markdown(
-        """
-    ### Ici on va afficher : 
-    -  Anomalies détectées.
-    - Score d'anomalie.
-    - Variables ayant contribué à la détection.
-    - Historique des anomalies.
-    """
-    )
+# execution de la navigation 
+pg_manager.run()
