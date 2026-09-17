@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.title("Analyse Réseau 🌐")
+st.title("Analyse Réseau")
 st.markdown(
     """
     ### Ici on va afficher : 

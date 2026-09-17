@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.title("Alertes 🔔")
+st.title("Alertes")
 st.markdown(
     """
     ### Ici on va afficher : 

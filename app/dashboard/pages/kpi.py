@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.title("Vue d'ensemble & KPI 📊")
+st.title("Vue d'ensemble & KPI")
 st.markdown(
     """
     ### Ici on va afficher : 

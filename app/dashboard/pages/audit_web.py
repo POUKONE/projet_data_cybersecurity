@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.title("Audit Web 💻")
+st.title("Audit Web")
 st.markdown(
     """
     ### Ici on va afficher : 

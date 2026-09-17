@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.title("Analyse des Logs 📝")
+st.title("Analyse des Logs")
 st.markdown(
     """
     ### Ici on va afficher : 

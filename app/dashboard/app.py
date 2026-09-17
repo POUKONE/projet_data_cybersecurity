@@ -9,13 +9,13 @@ st.sidebar.title(" Dashboard")
 st.sidebar.markdown("---")
 
 # Définitions des pages pour la barre de navigation
-page_acceuil = st.Page("pages/acceuil.py", title="Acceuil", icon="🏠")
-page_kpi = st.Page("pages/kpi.py", title="KPI", icon="📊")
-page_network = st.Page("pages/network.py", title="Réseau", icon="🌐")
-page_logs = st.Page("pages/logs.py", title="Logs", icon="📝")
-page_web = st.Page("pages/audit_web.py", title="Web", icon="💻")
-page_alertes = st.Page("pages/alertes.py", title="Alertes", icon="🔔")
-page_ml = st.Page("pages/ml.py", title="ML", icon="🧠")
+page_acceuil = st.Page("pages/acceuil.py", title="Acceuil", icon=":material/home:")
+page_kpi = st.Page("pages/kpi.py", title="KPI", icon=":material/stacked_bar_chart:")
+page_network = st.Page("pages/network.py", title="Réseau", icon=":material/dns:")
+page_logs = st.Page("pages/logs.py", title="Logs", icon=":material/notes:")
+page_web = st.Page("pages/audit_web.py", title="Web", icon=":material/lan:")
+page_alertes = st.Page("pages/alertes.py", title="Alertes", icon=":material/notifications:")
+page_ml = st.Page("pages/ml.py", title="ML", icon=":material/insights:")
 
 # Création de la barre de navigation
 pg_manager = st.navigation([
