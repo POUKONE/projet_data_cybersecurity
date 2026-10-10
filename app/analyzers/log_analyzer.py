@@ -258,38 +258,3 @@ if __name__ == "__main__":
         )
 
         print("-" * 40)
-
-burst_detections = detect_failed_login_bursts(...)
-
-print("\n--- Alertes de sécurité ---")
-
-for detection in burst_detections:
-
-    # Transformation de la détection
-    # en alerte de sécurité.
-    alert = build_security_alert(
-        detection
-    )
-
-    print(
-        f"Type : {alert['event_type']}"
-    )
-
-    print(
-        f"IP : {alert['ip_address']}"
-    )
-
-    print(
-        f"Score : {alert['risk_score']}/100"
-    )
-
-    print(
-        f"Niveau : {alert['risk_level']}"
-    )
-
-    print(
-        f"Description : "
-        f"{alert['description']}"
-    )
-
-    print("-" * 50)
