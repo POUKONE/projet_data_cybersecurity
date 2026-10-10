@@ -1,6 +1,7 @@
 import pandas as pd
 from app.scoring.risk_engine import build_security_alert
 
+
 def logs_to_dataframe(
     parsed_logs: list[dict]
 ) -> pd.DataFrame:
@@ -219,6 +220,77 @@ if __name__ == "__main__":
         threshold=5,
         window_minutes=5
     )
+
+    # ============================================================
+    # GÉNÉRATION DES ALERTES DE SÉCURITÉ
+    # ============================================================
+
+    # Liste qui contiendra toutes les alertes
+    # générées à partir des détections.
+    security_alerts = []
+
+    # Chaque détection brute va être transformée
+    # en alerte enrichie avec :
+    # - un score ;
+    # - un niveau de risque ;
+    # - une description ;
+    # - les informations de contexte.
+    for detection in burst_detections:
+
+    # Transformation de la détection en alerte.
+        alert = build_security_alert(
+            detection
+    )
+
+        # Ajout de l'alerte dans notre liste.
+        security_alerts.append(
+            alert
+    )
+
+    print("\n--- Alertes de sécurité ---")
+
+    # Si aucune alerte n'a été générée,
+    # on affiche un message explicite.
+    if not security_alerts:
+        print("Aucune alerte de sécurité générée.")
+
+    # Sinon, on affiche chaque alerte.
+    for alert in security_alerts:
+
+        print(
+            f"Type : {alert['event_type']}"
+    )
+
+        print(
+            f"IP : {alert['ip_address']}"
+    )
+
+        print(
+            f"Nombre d'échecs : "
+            f"{alert['failed_attempts']}"
+    )
+
+        print(
+            f"Score de risque : "
+            f"{alert['risk_score']}/100"
+    )
+
+        print(
+            f"Niveau : "
+            f"{alert['risk_level']}"
+    )
+
+        print(
+            f"Utilisateurs ciblés : "
+            f"{alert['targeted_users']}"
+    )
+
+        print(
+            f"Description : "
+            f"{alert['description']}"
+    )
+
+        print("-" * 50)
 
     print(
         "\n--- Tentatives suspectes détectées ---"
