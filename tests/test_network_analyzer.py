@@ -2,8 +2,158 @@ from unittest.mock import patch
 
 from app.analyzers.network_analyzer import (
     detect_new_ports,
-    process_network_detections
+    process_network_detections,
+    run_network_analysis
 )
+
+@patch(
+    "app.analyzers.network_analyzer.process_network_detections"
+)
+@patch(
+    "app.analyzers.network_analyzer.save_network_scan"
+)
+@patch(
+    "app.analyzers.network_analyzer.scan_target"
+)
+@patch(
+    "app.analyzers.network_analyzer.get_latest_network_scan"
+)
+def test_run_network_analysis(
+    mock_get_latest_scan,
+    mock_scan_target,
+    mock_save_scan,
+    mock_process_detections
+):
+    """
+    Vérifie le pipeline réseau complet.
+    """
+
+    previous_scan = [
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 135,
+            "state": "open",
+            "service": "msrpc",
+            "product": "",
+            "version": ""
+        }
+    ]
+
+    current_scan = [
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 135,
+            "state": "open",
+            "service": "msrpc",
+            "product": "",
+            "version": ""
+        },
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 1521,
+            "state": "open",
+            "service": "oracle-tns",
+            "product": "Oracle TNS listener",
+            "version": ""
+        }
+    ]
+
+    expected_alerts = [
+        {
+            "event_type": "NEW_PORT_DETECTED",
+            "port": 1521,
+            "risk_score": 40,
+            "risk_level": "MEDIUM"
+        }
+    ]
+
+    mock_get_latest_scan.return_value = (
+        previous_scan
+    )
+
+    mock_scan_target.return_value = (
+        current_scan
+    )
+
+    mock_process_detections.return_value = (
+        expected_alerts
+    )
+
+    alerts = run_network_analysis(
+        "127.0.0.1"
+    )
+
+    assert alerts == expected_alerts
+
+    mock_get_latest_scan.assert_called_once()
+
+    mock_scan_target.assert_called_once_with(
+        "127.0.0.1"
+    )
+
+    mock_save_scan.assert_called_once_with(
+        current_scan
+    )
+
+    mock_process_detections.assert_called_once()
+
+@patch(
+    "app.analyzers.network_analyzer.process_network_detections"
+)
+@patch(
+    "app.analyzers.network_analyzer.save_network_scan"
+)
+@patch(
+    "app.analyzers.network_analyzer.scan_target"
+)
+@patch(
+    "app.analyzers.network_analyzer.get_latest_network_scan"
+)
+def test_first_network_scan_creates_baseline(
+    mock_get_latest_scan,
+    mock_scan_target,
+    mock_save_scan,
+    mock_process_detections
+):
+    """
+    Le premier scan sert uniquement
+    de référence initiale.
+    """
+
+    mock_get_latest_scan.return_value = []
+
+    current_scan = [
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 135,
+            "state": "open",
+            "service": "msrpc",
+            "product": "",
+            "version": ""
+        }
+    ]
+
+    mock_scan_target.return_value = (
+        current_scan
+    )
+
+    alerts = run_network_analysis(
+        "127.0.0.1"
+    )
+
+    assert alerts == []
+
+    mock_save_scan.assert_called_once_with(
+        current_scan
+    )
+
+    mock_process_detections.assert_not_called()
+
+
 
 @patch(
     "app.analyzers.network_analyzer.save_alert"

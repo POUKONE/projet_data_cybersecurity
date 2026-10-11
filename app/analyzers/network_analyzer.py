@@ -10,6 +10,69 @@ Ce module permet notamment :
 from app.scoring.risk_engine import build_security_alert
 from app.database.db import save_alert
 
+from app.collectors.nmap_collector import scan_target
+
+from app.database.db import (
+    get_latest_network_scan,
+    save_network_scan
+)
+
+def run_network_analysis(
+    target: str
+) -> list[dict]:
+    """
+    Lance un scan réseau complet.
+
+    Étapes :
+    - récupérer le dernier scan enregistré ;
+    - lancer un nouveau scan Nmap ;
+    - sauvegarder le nouveau scan ;
+    - comparer avec le précédent ;
+    - détecter les nouveaux ports ;
+    - générer et stocker les alertes.
+
+    Paramètres
+    ----------
+    target : str
+        Cible à analyser.
+
+    Retour
+    ------
+    list[dict]
+        Alertes générées.
+    """
+
+    # Récupération du dernier scan disponible.
+    previous_scan = get_latest_network_scan()
+
+    # Nouveau scan Nmap.
+    current_scan = scan_target(
+        target
+    )
+
+    # Sauvegarde du nouveau scan.
+    save_network_scan(
+        current_scan
+    )
+
+    # Cas particulier :
+    # s'il n'existe aucun scan précédent,
+    # on crée simplement la référence initiale.
+    if not previous_scan:
+        return []
+
+    # Comparaison des deux scans.
+    detections = detect_new_ports(
+        previous_scan,
+        current_scan
+    )
+
+    # Transformation en alertes + stockage SQLite.
+    alerts = process_network_detections(
+        detections
+    )
+
+    return alerts
 
 def process_network_detections(
     detections: list[dict]
