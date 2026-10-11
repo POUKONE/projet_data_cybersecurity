@@ -1,5 +1,10 @@
 import pandas as pd
 from app.scoring.risk_engine import build_security_alert
+from app.database.db import (
+    initialize_database,
+    save_security_event,
+    save_alert
+)
 
 
 def logs_to_dataframe(
@@ -214,6 +219,32 @@ if __name__ == "__main__":
         parsed_logs
     )
 
+    # ============================================================
+    # INITIALISATION DE LA BASE DE DONNÉES
+    # ============================================================
+
+    initialize_database()
+
+    # ============================================================
+    # STOCKAGE DES ÉVÉNEMENTS
+    # ============================================================
+
+    for _, row in df.iterrows():
+
+        event = {
+            "event_type": row.get("event_type"),
+            "ip_address": row.get("ip_address"),
+            "timestamp": row.get("timestamp"),
+            "message": (
+                f"Utilisateur={row.get('username')} | "
+                f"Statut={row.get('status')}"
+        )
+    }
+
+        save_security_event(
+            event
+    )
+
     # Détection.
     burst_detections = detect_failed_login_bursts(
         df,
@@ -235,16 +266,33 @@ if __name__ == "__main__":
     # - un niveau de risque ;
     # - une description ;
     # - les informations de contexte.
+    
+    # ============================================================
+    # GÉNÉRATION ET STOCKAGE DES ALERTES
+    # ============================================================
+
+    security_alerts = []
+
     for detection in burst_detections:
 
-    # Transformation de la détection en alerte.
+        # Transformation de la détection
+        # en alerte enrichie.
         alert = build_security_alert(
             detection
     )
 
-        # Ajout de l'alerte dans notre liste.
         security_alerts.append(
             alert
+    )
+
+        # Stockage automatique dans SQLite.
+        alert_id = save_alert(
+            alert
+    )
+
+        print(
+            f"Alerte enregistrée en base "
+            f"avec l'ID : {alert_id}"
     )
 
     print("\n--- Alertes de sécurité ---")
