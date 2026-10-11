@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from app.analyzers.network_analyzer import (
     detect_new_ports,
+    detect_new_services,
     process_network_detections,
     run_network_analysis
 )
@@ -403,3 +404,59 @@ def test_closed_port_is_not_detected():
     )
 
     assert detections == []
+
+def test_detect_new_service():
+    """
+    Vérifie qu'un changement de service
+    sur un port existant est détecté.
+    """
+
+    previous_scan = [
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 8080,
+            "state": "open",
+            "service": "http",
+            "product": "",
+            "version": ""
+        }
+    ]
+
+    current_scan = [
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 8080,
+            "state": "open",
+            "service": "http-proxy",
+            "product": "",
+            "version": ""
+        }
+    ]
+
+    detections = detect_new_services(
+        previous_scan,
+        current_scan
+    )
+
+    assert len(detections) == 1
+
+    detection = detections[0]
+
+    assert (
+        detection["event_type"]
+        == "NEW_SERVICE_DETECTED"
+    )
+
+    assert detection["port"] == 8080
+
+    assert (
+        detection["previous_service"]
+        == "http"
+    )
+
+    assert (
+        detection["service"]
+        == "http-proxy"
+    )

@@ -181,6 +181,10 @@ def build_security_alert(detection: dict) -> dict:
             "targeted_users",
             []
         ),
+
+        "previous_service": detection.get(
+            "previous_service"
+),
     }
 
     return alert

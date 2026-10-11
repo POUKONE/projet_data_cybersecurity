@@ -285,3 +285,25 @@ def test_network_alert_creation():
     assert alert["risk_score"] == 40
 
     assert alert["risk_level"] == "MEDIUM"
+
+def test_new_service_score():
+    """
+    Vérifie le score de base
+    d'un changement de service réseau.
+    """
+
+    detection = {
+        "event_type": "NEW_SERVICE_DETECTED",
+        "ip_address": "127.0.0.1",
+        "port": 8080,
+        "previous_service": "http",
+        "service": "http-proxy"
+    }
+
+    score = calculate_risk_score(
+        detection
+    )
+
+    assert score == 25
+
+    assert get_risk_level(score) == "LOW"

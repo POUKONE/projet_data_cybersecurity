@@ -61,24 +61,28 @@ def run_network_analysis(
     if not previous_scan:
         return []
 
-    # Comparaison des deux scans.
+    # Détection des nouveaux ports.
     new_port_detections = detect_new_ports(
         previous_scan,
         current_scan
-    )
+)
 
+    # Détection des changements de services.
     new_service_detections = detect_new_services(
         previous_scan,
         current_scan
-    )
+)
+
+    # Regroupement de toutes les détections réseau.
     detections = (
         new_port_detections
         + new_service_detections
 )
-    # Transformation en alertes + stockage SQLite.
+
+    # Génération des alertes et stockage SQLite.
     alerts = process_network_detections(
-        detections + new_service_detections
-    )
+        detections
+)
 
     return alerts
 
@@ -242,6 +246,85 @@ def detect_new_services(
                     "product": item.get("product"),
                     "version": item.get("version"),
                 }
+            )
+
+    return detections
+
+def detect_new_services(
+    previous_scan: list[dict],
+    current_scan: list[dict]
+) -> list[dict]:
+    """
+    Détecte un changement de service sur un port
+    qui existait déjà dans le scan précédent.
+
+    Exemple :
+    ancien scan : port 8080 -> http
+    nouveau scan : port 8080 -> http-proxy
+
+    Retour
+    ------
+    list[dict]
+        Liste des changements de service détectés.
+    """
+
+    # On construit un dictionnaire :
+    # (host, protocol, port) -> service
+    previous_services = {
+        (
+            item.get("host"),
+            item.get("protocol"),
+            item.get("port")
+        ): item.get("service")
+        for item in previous_scan
+        if item.get("state") == "open"
+    }
+
+    detections = []
+
+    for item in current_scan:
+
+        # On analyse uniquement les ports ouverts.
+        if item.get("state") != "open":
+            continue
+
+        key = (
+            item.get("host"),
+            item.get("protocol"),
+            item.get("port")
+        )
+
+        previous_service = previous_services.get(
+            key
+        )
+
+        current_service = item.get(
+            "service"
+        )
+
+        # Le port doit déjà avoir existé.
+        if previous_service is None:
+            continue
+
+        # Si le service a changé,
+        # on génère une détection.
+        if current_service != previous_service:
+
+            detection = {
+                "event_type": "NEW_SERVICE_DETECTED",
+                "host": item.get("host"),
+                "ip_address": item.get("host"),
+                "protocol": item.get("protocol"),
+                "port": item.get("port"),
+                "state": item.get("state"),
+                "previous_service": previous_service,
+                "service": current_service,
+                "product": item.get("product"),
+                "version": item.get("version"),
+            }
+
+            detections.append(
+                detection
             )
 
     return detections
