@@ -3,7 +3,9 @@ import sqlite3
 from app.database.db import (
     get_connection,
     initialize_database,
-    DATABASE_PATH
+    DATABASE_PATH,
+    save_alert,
+    get_alerts
 )
 
 
@@ -92,3 +94,64 @@ def test_alerts_table_exists():
     connection.close()
 
     assert result is not None
+
+
+def test_save_alert():
+    """
+    Vérifie qu'une alerte peut être enregistrée
+    dans la base de données.
+    """
+
+    initialize_database()
+
+    alert = {
+        "event_type": "FAILED_LOGIN_BURST",
+        "ip_address": "172.16.0.12",
+        "risk_score": 52,
+        "risk_level": "HIGH",
+        "description": "Test d'alerte.",
+        "failed_attempts": 6,
+        "targeted_users": [
+            "admin",
+            "ibrahima",
+            "amsa"
+        ],
+        "start_time": "2026-09-15 11:05:48",
+        "end_time": "2026-09-15 11:07:22"
+    }
+
+    alert_id = save_alert(alert)
+
+    assert isinstance(alert_id, int)
+    assert alert_id > 0
+
+
+def test_get_alerts():
+    """
+    Vérifie qu'une alerte enregistrée
+    peut être récupérée depuis SQLite.
+    """
+
+    initialize_database()
+
+    alert = {
+        "event_type": "FAILED_LOGIN_BURST",
+        "ip_address": "192.168.1.50",
+        "risk_score": 40,
+        "risk_level": "MEDIUM",
+        "description": "Test récupération.",
+        "failed_attempts": 5,
+        "targeted_users": ["admin"],
+        "start_time": "2026-09-15 08:10:44",
+        "end_time": "2026-09-15 08:12:44"
+    }
+
+    save_alert(alert)
+
+    alerts = get_alerts()
+
+    assert len(alerts) > 0
+    assert isinstance(
+        alerts[0]["targeted_users"],
+        list
+    )
