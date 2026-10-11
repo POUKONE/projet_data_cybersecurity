@@ -1,9 +1,58 @@
+import os
+
 from app.security.crypto_utils import (
     generate_key,
     encrypt_text,
-    decrypt_text
+    decrypt_text,
+    load_encryption_key,
+    encrypt_sensitive_text,
+    decrypt_sensitive_text
 )
 
+def test_load_encryption_key(monkeypatch):
+    """
+    Vérifie que la clé peut être chargée
+    depuis une variable d'environnement.
+    """
+
+    key = generate_key()
+
+    monkeypatch.setenv(
+        "FERNET_KEY",
+        key.decode("utf-8")
+    )
+
+    loaded_key = load_encryption_key()
+
+    assert loaded_key == key
+
+def test_environment_encrypt_decrypt(
+    monkeypatch
+):
+    """
+    Vérifie le chiffrement avec la clé
+    chargée depuis l'environnement.
+    """
+
+    key = generate_key()
+
+    monkeypatch.setenv(
+        "FERNET_KEY",
+        key.decode("utf-8")
+    )
+
+    original = "192.168.1.25"
+
+    encrypted = encrypt_sensitive_text(
+        original
+    )
+
+    decrypted = decrypt_sensitive_text(
+        encrypted
+    )
+
+    assert encrypted != original
+    assert decrypted == original
 
 def test_generate_key():
     """
