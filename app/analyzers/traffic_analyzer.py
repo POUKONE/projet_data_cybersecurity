@@ -9,7 +9,8 @@ Ce module permet :
 """
 
 from collections import Counter
-
+from app.scoring.risk_engine import build_security_alert
+from app.database.db import save_alert
 
 def summarize_traffic(
     packets: list[dict]
@@ -199,4 +200,55 @@ def analyze_traffic(
     return {
         "summary": summary,
         "detections": detections
+    }
+
+def process_traffic_detections(
+    detections: list[dict]
+) -> list[dict]:
+    """
+    Transforme les détections de trafic
+    en alertes puis les stocke dans SQLite.
+    """
+
+    alerts = []
+
+    for detection in detections:
+
+        alert = build_security_alert(
+            detection
+        )
+
+        save_alert(
+            alert
+        )
+
+        alerts.append(
+            alert
+        )
+
+    return alerts
+
+def run_traffic_analysis(
+    packets: list[dict]
+) -> dict:
+    """
+    Lance l'analyse complète du trafic réseau.
+
+    Retour
+    ------
+    dict
+        Résumé du trafic et alertes générées.
+    """
+
+    analysis = analyze_traffic(
+        packets
+    )
+
+    alerts = process_traffic_detections(
+        analysis["detections"]
+    )
+
+    return {
+        "summary": analysis["summary"],
+        "alerts": alerts
     }

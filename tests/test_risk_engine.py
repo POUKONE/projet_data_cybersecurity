@@ -383,3 +383,57 @@ def test_x_frame_options_missing_score():
     }
 
     assert calculate_risk_score(detection) == 15
+
+
+def test_high_packet_activity_score():
+
+    detection = {
+        "event_type": "HIGH_PACKET_ACTIVITY",
+        "ip_address": "192.168.1.20",
+        "packet_count": 50
+    }
+
+    score = calculate_risk_score(
+        detection
+    )
+
+    assert score == 30
+    assert get_risk_level(score) == "MEDIUM"
+
+
+def test_port_scan_activity_score():
+
+    detection = {
+        "event_type": "PORT_SCAN_ACTIVITY",
+        "ip_address": "10.0.0.50",
+        "unique_ports": 20,
+        "ports": list(
+            range(20)
+        )
+    }
+
+    score = calculate_risk_score(
+        detection
+    )
+
+    assert score == 60
+    assert get_risk_level(score) == "HIGH"
+
+
+def test_large_port_scan_is_critical():
+
+    detection = {
+        "event_type": "PORT_SCAN_ACTIVITY",
+        "ip_address": "10.0.0.50",
+        "unique_ports": 60,
+        "ports": list(
+            range(60)
+        )
+    }
+
+    score = calculate_risk_score(
+        detection
+    )
+
+    assert score == 80
+    assert get_risk_level(score) == "CRITICAL"

@@ -1,9 +1,39 @@
+from unittest.mock import patch
+
 from app.analyzers.traffic_analyzer import (
     summarize_traffic,
     detect_high_packet_activity,
     detect_port_scan_activity,
-    analyze_traffic
+    analyze_traffic,
+    process_traffic_detections,
+    run_traffic_analysis
 )
+
+@patch(
+    "app.analyzers.traffic_analyzer.save_alert"
+)
+def test_process_traffic_detections(
+    mock_save_alert
+):
+
+    detections = [
+        {
+            "event_type": "HIGH_PACKET_ACTIVITY",
+            "ip_address": "192.168.1.20",
+            "packet_count": 50
+        }
+    ]
+
+    alerts = process_traffic_detections(
+        detections
+    )
+
+    assert len(alerts) == 1
+
+    assert alerts[0]["risk_score"] == 30
+    assert alerts[0]["risk_level"] == "MEDIUM"
+
+    mock_save_alert.assert_called_once()
 
 
 def test_summarize_traffic():

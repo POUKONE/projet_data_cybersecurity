@@ -48,6 +48,47 @@ def calculate_risk_score(detection: dict) -> int:
 
     score = rule["base_score"]
 
+
+        # ========================================================
+    # HIGH PACKET ACTIVITY
+    # ========================================================
+
+    if event_type.upper() == "HIGH_PACKET_ACTIVITY":
+
+        packet_count = detection.get(
+            "packet_count",
+            0
+        )
+
+        # Plus le volume dépasse le seuil,
+        # plus le score augmente.
+        if packet_count > 50:
+            extra_packets = packet_count - 50
+
+            score += min(
+                extra_packets // 10,
+                20
+            )
+
+    # ========================================================
+    # PORT SCAN ACTIVITY
+    # ========================================================
+
+    if event_type.upper() == "PORT_SCAN_ACTIVITY":
+
+        unique_ports = detection.get(
+            "unique_ports",
+            0
+        )
+
+        # Bonus si beaucoup de ports
+        # différents ont été contactés.
+        if unique_ports >= 20:
+            score += 15
+
+        if unique_ports >= 50:
+            score += 20
+
     # ========================================================
     # FAILED LOGIN BURST
     # ========================================================
@@ -164,6 +205,20 @@ def build_security_alert(detection: dict) -> dict:
         "url": detection.get("url"),
         "status_code": detection.get("status_code"),
         "message": detection.get("message"),
+
+                # Informations trafic réseau
+        "packet_count": detection.get(
+            "packet_count"
+        ),
+
+        "unique_ports": detection.get(
+            "unique_ports"
+        ),
+
+        "ports": detection.get(
+            "ports",
+            []
+        ),
 
         # Informations utiles si disponibles.
         "ip_address": detection.get(

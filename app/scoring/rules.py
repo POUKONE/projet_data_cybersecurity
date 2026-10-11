@@ -30,6 +30,26 @@ SECURITY_RULES = {
         ),
     },
 
+        # Activité réseau anormalement élevée.
+    "HIGH_PACKET_ACTIVITY": {
+        "base_score": 30,
+        "severity": "HIGH",
+        "description": (
+            "Un volume élevé de paquets réseau "
+            "a été détecté depuis une même adresse IP."
+        ),
+    },
+
+    # Activité ressemblant à un balayage de ports.
+    "PORT_SCAN_ACTIVITY": {
+        "base_score": 45,
+        "severity": "HIGH",
+        "description": (
+            "Une même adresse IP a contacté "
+            "un nombre important de ports différents."
+        ),
+    },
+
     # --------------------------------------------------------
     # Nouveau port réseau détecté
     # --------------------------------------------------------
