@@ -10,7 +10,7 @@ Ce module permet :
 import sqlite3
 from pathlib import Path
 import json
-
+from datetime import datetime
 
 # ============================================================
 # CONFIGURATION
@@ -84,6 +84,23 @@ def initialize_database() -> None:
         )
         """
     )
+
+    cursor.execute(
+    """
+    CREATE TABLE IF NOT EXISTS network_scans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host TEXT NOT NULL,
+        protocol TEXT,
+        port INTEGER NOT NULL,
+        state TEXT,
+        service TEXT,
+        product TEXT,
+        version TEXT,
+        scan_id TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """
+)
 
     # --------------------------------------------------------
     # Table des alertes
@@ -350,6 +367,201 @@ def get_security_events() -> list[dict]:
         dict(row)
         for row in rows
     ]
+
+def save_network_scan(
+    scan_results: list[dict],
+    scan_id: str | None = None
+) -> str:
+    """
+    Enregistre un scan Nmap complet dans SQLite.
+
+    Paramètres
+    ----------
+    scan_results : list[dict]
+        Résultats retournés par scan_target().
+
+    scan_id : str | None
+        Identifiant du scan. S'il n'est pas fourni,
+        il est généré automatiquement.
+
+    Retour
+    ------
+    str
+        Identifiant du scan sauvegardé.
+    """
+
+    if scan_id is None:
+        scan_id = datetime.now().strftime(
+            "%Y%m%d_%H%M%S_%f"
+        )
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    for result in scan_results:
+
+        cursor.execute(
+            """
+            INSERT INTO network_scans (
+                host,
+                protocol,
+                port,
+                state,
+                service,
+                product,
+                version,
+                scan_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                result.get("host"),
+                result.get("protocol"),
+                result.get("port"),
+                result.get("state"),
+                result.get("service"),
+                result.get("product"),
+                result.get("version"),
+                scan_id
+            )
+        )
+
+    connection.commit()
+    connection.close()
+
+    return scan_id
+
+
+def get_latest_network_scan() -> list[dict]:
+    """
+    Récupère le scan réseau le plus récent.
+    """
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT scan_id
+        FROM network_scans
+        ORDER BY id DESC
+        LIMIT 1
+        """
+    )
+
+    row = cursor.fetchone()
+
+    if row is None:
+        connection.close()
+        return []
+
+    scan_id = row["scan_id"]
+
+    cursor.execute(
+        """
+        SELECT
+            host,
+            protocol,
+            port,
+            state,
+            service,
+            product,
+            version
+        FROM network_scans
+        WHERE scan_id = ?
+        ORDER BY id ASC
+        """,
+        (
+            scan_id,
+        )
+    )
+
+    rows = cursor.fetchall()
+
+    connection.close()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+def get_last_two_network_scans() -> tuple[
+    list[dict],
+    list[dict]
+]:
+    """
+    Récupère les deux derniers scans réseau.
+
+    Retour
+    ------
+    tuple
+        (scan précédent, scan actuel)
+    """
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT DISTINCT scan_id
+        FROM network_scans
+        ORDER BY id DESC
+        LIMIT 2
+        """
+    )
+
+    scan_ids = [
+        row["scan_id"]
+        for row in cursor.fetchall()
+    ]
+
+    if len(scan_ids) < 2:
+        connection.close()
+        return [], []
+
+    current_scan_id = scan_ids[0]
+    previous_scan_id = scan_ids[1]
+
+    def fetch_scan(scan_id: str) -> list[dict]:
+
+        cursor.execute(
+            """
+            SELECT
+                host,
+                protocol,
+                port,
+                state,
+                service,
+                product,
+                version
+            FROM network_scans
+            WHERE scan_id = ?
+            ORDER BY id ASC
+            """,
+            (
+                scan_id,
+            )
+        )
+
+        return [
+            dict(row)
+            for row in cursor.fetchall()
+        ]
+
+    current_scan = fetch_scan(
+        current_scan_id
+    )
+
+    previous_scan = fetch_scan(
+        previous_scan_id
+    )
+
+    connection.close()
+
+    return (
+        previous_scan,
+        current_scan
+    )
 
 if __name__ == "__main__":
 

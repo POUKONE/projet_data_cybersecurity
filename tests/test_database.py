@@ -1,4 +1,5 @@
 import sqlite3
+import uuid
 
 from app.database.db import (
     get_connection,
@@ -7,7 +8,10 @@ from app.database.db import (
     save_alert,
     get_alerts,
     save_security_event,
-    get_security_events
+    get_security_events,
+    save_network_scan,
+    get_latest_network_scan,
+    get_last_two_network_scans
 )
 
 
@@ -211,3 +215,132 @@ def test_get_security_events():
 
     assert "event_type" in events[0]
     assert "ip_address" in events[0]
+
+
+def test_save_network_scan():
+    initialize_database()
+
+    scan = [
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 135,
+            "state": "open",
+            "service": "msrpc",
+            "product": "",
+            "version": ""
+        }
+    ]
+
+    scan_id = save_network_scan(
+        scan
+    )
+
+    assert isinstance(
+        scan_id,
+        str
+    )
+
+    assert len(scan_id) > 0
+
+def test_get_latest_network_scan():
+    initialize_database()
+
+    scan = [
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 445,
+            "state": "open",
+            "service": "microsoft-ds",
+            "product": "",
+            "version": ""
+        }
+    ]
+
+    save_network_scan(
+        scan
+    )
+
+    latest_scan = get_latest_network_scan()
+
+    assert len(latest_scan) > 0
+
+    assert latest_scan[0]["port"] == 445
+
+def test_get_last_two_network_scans():
+    """
+    Vérifie la récupération correcte
+    des deux derniers scans réseau.
+    """
+
+    initialize_database()
+
+    # Identifiant unique pour éviter que les anciens
+    # tests SQLite interfèrent avec ce test.
+    unique_id = uuid.uuid4().hex
+
+    first_scan_id = f"test_scan_1_{unique_id}"
+    second_scan_id = f"test_scan_2_{unique_id}"
+
+    first_scan = [
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 135,
+            "state": "open",
+            "service": "msrpc",
+            "product": "",
+            "version": ""
+        }
+    ]
+
+    second_scan = [
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 135,
+            "state": "open",
+            "service": "msrpc",
+            "product": "",
+            "version": ""
+        },
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 1521,
+            "state": "open",
+            "service": "oracle-tns",
+            "product": "Oracle TNS listener",
+            "version": ""
+        }
+    ]
+
+    save_network_scan(
+        first_scan,
+        scan_id=first_scan_id
+    )
+
+    save_network_scan(
+        second_scan,
+        scan_id=second_scan_id
+    )
+
+    previous_scan, current_scan = (
+        get_last_two_network_scans()
+    )
+
+    assert len(previous_scan) == 1
+    assert len(current_scan) == 2
+
+    assert previous_scan[0]["port"] == 135
+
+    current_ports = {
+        item["port"]
+        for item in current_scan
+    }
+
+    assert current_ports == {
+        135,
+        1521
+    }
