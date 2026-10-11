@@ -5,7 +5,9 @@ from app.database.db import (
     initialize_database,
     DATABASE_PATH,
     save_alert,
-    get_alerts
+    get_alerts,
+    save_security_event,
+    get_security_events
 )
 
 
@@ -155,3 +157,57 @@ def test_get_alerts():
         alerts[0]["targeted_users"],
         list
     )
+
+
+def test_save_security_event():
+    """
+    Vérifie qu'un événement peut être
+    enregistré dans SQLite.
+    """
+
+    initialize_database()
+
+    event = {
+        "event_type": "LOGIN",
+        "ip_address": "192.168.1.15",
+        "timestamp": "2026-09-15 08:30:10",
+        "message": "Tentative de connexion échouée."
+    }
+
+    event_id = save_security_event(
+        event
+    )
+
+    assert isinstance(event_id, int)
+    assert event_id > 0
+
+def test_get_security_events():
+    """
+    Vérifie que les événements enregistrés
+    peuvent être récupérés.
+    """
+
+    initialize_database()
+
+    event = {
+        "event_type": "LOGIN",
+        "ip_address": "10.0.0.8",
+        "timestamp": "2026-09-15 09:15:00",
+        "message": "Connexion utilisateur."
+    }
+
+    save_security_event(
+        event
+    )
+
+    events = get_security_events()
+
+    assert len(events) > 0
+
+    assert isinstance(
+        events[0],
+        dict
+    )
+
+    assert "event_type" in events[0]
+    assert "ip_address" in events[0]

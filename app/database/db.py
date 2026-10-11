@@ -268,6 +268,89 @@ def get_alerts() -> list[dict]:
 
     return alerts
 
+def save_security_event(event: dict) -> int:
+    """
+    Enregistre un événement de sécurité dans SQLite.
+
+    Paramètres
+    ----------
+    event : dict
+        Événement provenant du parser ou de l'analyseur.
+
+    Retour
+    ------
+    int
+        Identifiant de l'événement enregistré.
+    """
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    # Récupération du timestamp.
+    timestamp = event.get("timestamp")
+
+    # Les timestamps Pandas ou datetime
+    # sont convertis en texte pour SQLite.
+    if timestamp is not None:
+        timestamp = str(timestamp)
+
+    cursor.execute(
+        """
+        INSERT INTO security_events (
+            event_type,
+            ip_address,
+            timestamp,
+            message
+        )
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            event.get("event_type"),
+            event.get("ip_address"),
+            timestamp,
+            event.get("message")
+        )
+    )
+
+    connection.commit()
+
+    event_id = cursor.lastrowid
+
+    connection.close()
+
+    return event_id
+
+def get_security_events() -> list[dict]:
+    """
+    Récupère tous les événements de sécurité
+    présents dans SQLite.
+
+    Retour
+    ------
+    list[dict]
+        Liste des événements enregistrés.
+    """
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT *
+        FROM security_events
+        ORDER BY id DESC
+        """
+    )
+
+    rows = cursor.fetchall()
+
+    connection.close()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
 if __name__ == "__main__":
 
     initialize_database()
