@@ -7,6 +7,36 @@ Ce module permet notamment :
 - de générer des événements de sécurité.
 """
 
+from app.scoring.risk_engine import build_security_alert
+from app.database.db import save_alert
+
+
+def process_network_detections(
+    detections: list[dict]
+) -> list[dict]:
+    """
+    Transforme les détections réseau en alertes
+    et les enregistre dans SQLite.
+    """
+
+    alerts = []
+
+    for detection in detections:
+
+        alert = build_security_alert(
+            detection
+        )
+
+        save_alert(
+            alert
+        )
+
+        alerts.append(
+            alert
+        )
+
+    return alerts
+
 
 def detect_new_ports(
     previous_scan: list[dict],

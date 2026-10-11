@@ -1,5 +1,112 @@
-from app.analyzers.network_analyzer import detect_new_ports
+from unittest.mock import patch
 
+from app.analyzers.network_analyzer import (
+    detect_new_ports,
+    process_network_detections
+)
+
+@patch(
+    "app.analyzers.network_analyzer.save_alert"
+)
+def test_process_network_detection(
+    mock_save_alert
+):
+    """
+    Vérifie qu'une détection réseau :
+    - devient une alerte ;
+    - reçoit un score ;
+    - est envoyée vers SQLite.
+    """
+
+    detection = {
+        "event_type": "NEW_PORT_DETECTED",
+        "host": "127.0.0.1",
+        "ip_address": "127.0.0.1",
+        "protocol": "tcp",
+        "port": 1521,
+        "state": "open",
+        "service": "oracle-tns",
+        "product": "Oracle TNS listener",
+        "version": ""
+    }
+
+    detections = [
+        detection
+    ]
+
+    alerts = process_network_detections(
+        detections
+    )
+
+    # Une détection doit produire une alerte.
+    assert len(alerts) == 1
+
+    alert = alerts[0]
+
+    assert (
+        alert["event_type"]
+        == "NEW_PORT_DETECTED"
+    )
+
+    assert alert["port"] == 1521
+
+    # 1521 est défini comme port sensible.
+    assert alert["risk_score"] == 40
+
+    assert alert["risk_level"] == "MEDIUM"
+
+    # Vérifie que l'enregistrement SQLite
+    # a bien été demandé.
+    mock_save_alert.assert_called_once()
+
+@patch(
+    "app.analyzers.network_analyzer.save_alert"
+)
+def test_process_multiple_network_detections(
+    mock_save_alert
+):
+    """
+    Vérifie que plusieurs détections
+    produisent plusieurs alertes.
+    """
+
+    detections = [
+        {
+            "event_type": "NEW_PORT_DETECTED",
+            "host": "127.0.0.1",
+            "ip_address": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 445,
+            "state": "open",
+            "service": "microsoft-ds",
+            "product": "",
+            "version": ""
+        },
+        {
+            "event_type": "NEW_PORT_DETECTED",
+            "host": "127.0.0.1",
+            "ip_address": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 8080,
+            "state": "open",
+            "service": "http-proxy",
+            "product": "",
+            "version": ""
+        }
+    ]
+
+    alerts = process_network_detections(
+        detections
+    )
+
+    assert len(alerts) == 2
+
+    # save_alert doit être appelé
+    # une fois par détection.
+    assert mock_save_alert.call_count == 2
+
+    assert alerts[0]["risk_score"] == 40
+    assert alerts[1]["risk_score"] == 20
 
 def test_no_new_port():
     previous_scan = [
