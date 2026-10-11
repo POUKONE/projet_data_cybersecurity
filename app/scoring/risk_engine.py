@@ -143,108 +143,375 @@ def calculate_risk_score(detection: dict) -> int:
 
     return score
 
-def build_security_alert(detection: dict) -> dict:
+def build_default_description(
+    event_type: str | None,
+    detection: dict
+) -> str:
     """
-    Transforme une détection brute en alerte de sécurité.
-
-    Paramètres
-    ----------
-    detection : dict
-        Résultat produit par un analyseur.
-
-    Retour
-    ------
-    dict
-        Alerte enrichie avec score, gravité
-        et description.
+    Génère une description lisible
+    lorsqu'aucune description explicite
+    n'est fournie par la détection.
     """
 
-    # Type d'événement.
-    event_type = detection.get(
-        "event_type",
-        "UNKNOWN"
+    descriptions = {
+        "FAILED_LOGIN_BURST": (
+            "Plusieurs tentatives de connexion échouées "
+            "ont été détectées sur une courte période."
+        ),
+
+        "NEW_PORT_DETECTED": (
+            "Un nouveau port réseau a été détecté "
+            "sur la cible analysée."
+        ),
+
+        "NEW_SERVICE_DETECTED": (
+            "Un nouveau service réseau a été détecté "
+            "sur un port existant."
+        ),
+
+        "HTTPS_MISSING": (
+            "Le site analysé n'utilise pas HTTPS."
+        ),
+
+        "CSP_MISSING": (
+            "L'en-tête Content-Security-Policy est absent."
+        ),
+
+        "HSTS_MISSING": (
+            "L'en-tête Strict-Transport-Security est absent."
+        ),
+
+        "X_CONTENT_TYPE_OPTIONS_MISSING": (
+            "L'en-tête X-Content-Type-Options est absent."
+        ),
+
+        "X_FRAME_OPTIONS_MISSING": (
+            "L'en-tête X-Frame-Options est absent."
+        ),
+
+        "REFERRER_POLICY_MISSING": (
+            "L'en-tête Referrer-Policy est absent."
+        ),
+
+        "HIGH_PACKET_ACTIVITY": (
+            "Une activité réseau anormalement élevée "
+            "a été détectée."
+        ),
+
+        "PORT_SCAN_ACTIVITY": (
+            "Une activité ressemblant à un scan de ports "
+            "a été détectée."
+        ),
+    }
+
+    if not event_type:
+        return "Observation de sécurité détectée."
+
+    return descriptions.get(
+        event_type.upper(),
+        "Observation de sécurité détectée."
     )
 
-    # Récupération de la règle.
-    rule = get_rule(event_type)
 
-    # Calcul du score.
+def build_security_alert(detection: dict) -> dict:
+    """
+    Transforme une détection technique en alerte
+    de sécurité normalisée.
+
+    Cette fonction :
+    - calcule le score de risque ;
+    - détermine le niveau de risque ;
+    - identifie la source de la détection ;
+    - détermine la cible concernée ;
+    - construit un message lisible ;
+    - conserve les informations spécifiques
+      aux logs, au réseau, au Web et au trafic.
+    """
+
+    # ========================================================
+    # INFORMATIONS PRINCIPALES
+    # ========================================================
+
+    event_type = detection.get(
+        "event_type"
+    )
+
     risk_score = calculate_risk_score(
         detection
     )
 
-    # Conversion du score en niveau de risque.
     risk_level = get_risk_level(
         risk_score
     )
 
-    # Description par défaut.
-    description = (
-        "Événement de sécurité détecté."
+
+    # ========================================================
+    # SOURCE DE L'ALERTE
+    # ========================================================
+
+    source_type = (
+        detection.get(
+            "source_type"
+        )
+        or get_source_type(
+            event_type
+        )
     )
 
-    # Si une règle existe,
-    # on récupère sa description.
-    if rule is not None:
-        description = rule["description"]
 
-    # Construction de l'alerte finale.
+    # ========================================================
+    # INFORMATIONS SUR LA CIBLE
+    # ========================================================
+
+    ip_address = detection.get(
+        "ip_address"
+    )
+
+    host = detection.get(
+        "host"
+    )
+
+    url = detection.get(
+        "url"
+    )
+
+    target = detection.get(
+        "target"
+    )
+
+
+    # Si aucune cible n'a été fournie explicitement,
+    # on essaie de la déterminer automatiquement.
+    if not target:
+
+        if url:
+            target = url
+
+        elif host:
+            target = host
+
+        elif ip_address:
+            target = ip_address
+
+
+    # ========================================================
+    # MESSAGE
+    # ========================================================
+
+    description = (
+        detection.get(
+            "description"
+    )
+        or build_default_description(
+            event_type,
+            detection
+    )
+)
+
+
+    message = (
+        detection.get(
+            "message"
+    )
+        or description
+)
+
+
+    # ========================================================
+    # ALERTE NORMALISÉE
+    # ========================================================
+
     alert = {
+        "source_type": source_type,
+
+        "target": target,
+
         "event_type": event_type,
+
+        "ip_address": ip_address,
+
+        "host": host,
+
+        "url": url,
+
         "risk_score": risk_score,
+
         "risk_level": risk_level,
+
+        "message": message,
+
         "description": description,
-        "host": detection.get("host"),
-        "protocol": detection.get("protocol"),
-        "port": detection.get("port"),
-        "service": detection.get("service"),
-        "product": detection.get("product"),
-        "version": detection.get("version"),
 
-        # Informations Web
-        "url": detection.get("url"),
-        "status_code": detection.get("status_code"),
-        "message": detection.get("message"),
-
-                # Informations trafic réseau
-        "packet_count": detection.get(
-            "packet_count"
+        "status": detection.get(
+            "status",
+            "OPEN"
         ),
-
-        "unique_ports": detection.get(
-            "unique_ports"
-        ),
-
-        "ports": detection.get(
-            "ports",
-            []
-        ),
-
-        # Informations utiles si disponibles.
-        "ip_address": detection.get(
-            "ip_address"
-        ),
-
-        "start_time": detection.get(
-            "start_time"
-        ),
-
-        "end_time": detection.get(
-            "end_time"
-        ),
-
-        "failed_attempts": detection.get(
-            "failed_attempts"
-        ),
-
-        "targeted_users": detection.get(
-            "targeted_users",
-            []
-        ),
-
-        "previous_service": detection.get(
-            "previous_service"
-),
     }
 
+
+    # ========================================================
+    # INFORMATIONS LOGS
+    # ========================================================
+
+    alert["start_time"] = detection.get(
+        "start_time"
+    )
+
+    alert["end_time"] = detection.get(
+        "end_time"
+    )
+
+    alert["failed_attempts"] = detection.get(
+        "failed_attempts"
+    )
+
+    alert["targeted_users"] = (
+        detection.get(
+            "targeted_users"
+        )
+        or []
+    )
+
+
+    # ========================================================
+    # INFORMATIONS RÉSEAU / NMAP
+    # ========================================================
+
+    alert["protocol"] = detection.get(
+        "protocol"
+    )
+
+    alert["port"] = detection.get(
+        "port"
+    )
+
+    alert["state"] = detection.get(
+        "state"
+    )
+
+    alert["service"] = detection.get(
+        "service"
+    )
+
+    alert["previous_service"] = detection.get(
+        "previous_service"
+    )
+
+    alert["product"] = detection.get(
+        "product"
+    )
+
+    alert["version"] = detection.get(
+        "version"
+    )
+
+
+    # ========================================================
+    # INFORMATIONS WEB
+    # ========================================================
+
+    alert["status_code"] = detection.get(
+        "status_code"
+    )
+
+
+    # ========================================================
+    # INFORMATIONS TRAFIC / SCAPY
+    # ========================================================
+
+    alert["packet_count"] = detection.get(
+        "packet_count"
+    )
+
+    alert["unique_ports"] = detection.get(
+        "unique_ports"
+    )
+
+    alert["ports"] = (
+        detection.get(
+            "ports"
+        )
+        or []
+    )
+
+
+    # ========================================================
+    # AUTRES INFORMATIONS UTILES
+    # ========================================================
+
+    alert["username"] = detection.get(
+        "username"
+    )
+
+    alert["protocol"] = detection.get(
+        "protocol"
+    )
+
+    alert["src_port"] = detection.get(
+        "src_port"
+    )
+
+    alert["dst_port"] = detection.get(
+        "dst_port"
+    )
+
+    alert["src_ip"] = detection.get(
+        "src_ip"
+    )
+
+    alert["dst_ip"] = detection.get(
+        "dst_ip"
+    )
+
+
     return alert
+
+def get_source_type(
+    event_type: str | None
+) -> str:
+    """
+    Détermine la source technique
+    d'une alerte selon son type.
+    """
+
+    if not event_type:
+        return "UNKNOWN"
+
+    event_type = event_type.upper()
+
+    log_events = {
+        "FAILED_LOGIN_BURST",
+    }
+
+    network_events = {
+        "NEW_PORT_DETECTED",
+        "NEW_SERVICE_DETECTED",
+    }
+
+    web_events = {
+        "HTTPS_MISSING",
+        "CSP_MISSING",
+        "HSTS_MISSING",
+        "X_CONTENT_TYPE_OPTIONS_MISSING",
+        "X_FRAME_OPTIONS_MISSING",
+        "REFERRER_POLICY_MISSING",
+    }
+
+    traffic_events = {
+        "HIGH_PACKET_ACTIVITY",
+        "PORT_SCAN_ACTIVITY",
+    }
+
+    if event_type in log_events:
+        return "LOG"
+
+    if event_type in network_events:
+        return "NETWORK"
+
+    if event_type in web_events:
+        return "WEB"
+
+    if event_type in traffic_events:
+        return "TRAFFIC"
+
+    return "UNKNOWN"

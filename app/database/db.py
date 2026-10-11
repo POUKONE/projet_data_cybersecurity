@@ -14,6 +14,8 @@ from pathlib import Path
 import json
 from datetime import datetime
 
+from streamlit import connection
+
 from app.security.crypto_utils import (
     encrypt_sensitive_text,
     decrypt_sensitive_text
@@ -62,6 +64,48 @@ def get_connection() -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
 
     return connection
+
+
+def ensure_alert_columns(connection):
+    """
+    Vérifie que la table alerts contient
+    les colonnes utilisées par le nouveau
+    modèle de supervision.
+
+    Les colonnes manquantes sont ajoutées
+    automatiquement.
+    """
+
+    cursor = connection.execute(
+        "PRAGMA table_info(alerts)"
+    )
+
+    existing_columns = {
+        row["name"]
+        for row in cursor.fetchall()
+    }
+
+    required_columns = {
+        "source_type": "TEXT",
+        "target": "TEXT",
+        "host": "TEXT",
+        "url": "TEXT",
+        "message": "TEXT",
+        "status": "TEXT DEFAULT 'OPEN'",
+    }
+
+    for column_name, column_type in required_columns.items():
+
+        if column_name not in existing_columns:
+
+            connection.execute(
+                f"""
+                ALTER TABLE alerts
+                ADD COLUMN {column_name} {column_type}
+                """
+            )
+
+    connection.commit()
 
 def initialize_database() -> None:
     """
@@ -113,23 +157,42 @@ def initialize_database() -> None:
     # Table des alertes
     # --------------------------------------------------------
 
-    cursor.execute(
+    connection.execute(
         """
         CREATE TABLE IF NOT EXISTS alerts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            source_type TEXT,
+            target TEXT,
+
             event_type TEXT NOT NULL,
+
             ip_address TEXT,
-            risk_score INTEGER NOT NULL,
-            risk_level TEXT NOT NULL,
+            host TEXT,
+            url TEXT,
+
+            risk_score INTEGER,
+            risk_level TEXT,
+
+            message TEXT,
             description TEXT,
+
+            status TEXT DEFAULT 'OPEN',
+
             failed_attempts INTEGER,
             targeted_users TEXT,
+
             start_time TEXT,
             end_time TEXT,
+
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-        """
     )
+    """
+)
+
+    ensure_alert_columns(
+        connection
+)
 
     # Validation des changements.
     connection.commit()
@@ -183,112 +246,112 @@ def decrypt_database_value(
         encrypted_value
     )
 
+
 def save_alert(alert: dict) -> int:
     """
-    Enregistre une alerte de sécurité dans SQLite.
+    Enregistre une alerte de sécurité
+    dans SQLite.
 
-    Paramètres
-    ----------
-    alert : dict
-        Alerte générée par build_security_alert().
-
-    Retour
-    ------
-    int
-        Identifiant de l'alerte créée dans la base.
+    Les données sensibles sont chiffrées
+    avant stockage.
     """
 
-    # Ouverture d'une connexion à SQLite.
     connection = get_connection()
 
-    cursor = connection.cursor()
+    try:
 
-    # --------------------------------------------------------
-    # Gestion de targeted_users
-    # --------------------------------------------------------
-    #
-    # targeted_users est actuellement une liste Python :
-    #
-    # ["admin", "ibrahima", "amsa"]
-    #
-    # SQLite ne stocke pas directement les listes Python.
-    # On transforme donc la liste en chaîne JSON.
-    targeted_users = alert.get(
-        "targeted_users"
-    ) or []
-
-    targeted_users_json = json.dumps(
-        targeted_users
-    )
-
-    # --------------------------------------------------------
-    # Conversion des dates
-    # --------------------------------------------------------
-    #
-    # start_time et end_time peuvent être des Timestamp Pandas.
-    # On les convertit en texte avant stockage.
-
-    start_time = alert.get(
-        "start_time"
-    )
-
-    end_time = alert.get(
-        "end_time"
-    )
-
-    if start_time is not None:
-        start_time = str(start_time)
-
-    if end_time is not None:
-        end_time = str(end_time)
-
-    ip_address = encrypt_database_value(
-        alert.get("ip_address")
-)
-
-    # --------------------------------------------------------
-    # Insertion SQL
-    # --------------------------------------------------------
-
-    cursor.execute(
-        """
-        INSERT INTO alerts (
-            event_type,
-            ip_address,
-            risk_score,
-            risk_level,
-            description,
-            failed_attempts,
-            targeted_users,
-            start_time,
-            end_time
+        targeted_users = alert.get(
+            "targeted_users"
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            alert.get("event_type"),
-            ip_address,
-            alert.get("risk_score", 0),
-            alert.get("risk_level"),
-            alert.get("description"),
-            alert.get("failed_attempts"),
-            targeted_users_json,
-            start_time,
-            end_time,
+
+        if targeted_users is not None:
+            targeted_users = json.dumps(
+                targeted_users
+            )
+
+        ip_address = encrypt_database_value(
+            alert.get("ip_address")
         )
-    )
 
-    # Validation de l'insertion.
-    connection.commit()
+        target = encrypt_database_value(
+            alert.get("target")
+        )
 
-    # lastrowid correspond à l'identifiant
-    # automatiquement attribué par SQLite.
-    alert_id = cursor.lastrowid
+        host = encrypt_database_value(
+            alert.get("host")
+        )
 
-    # Fermeture propre de la connexion.
-    connection.close()
+        url = encrypt_database_value(
+            alert.get("url")
+        )
 
-    return alert_id
+        cursor = connection.execute(
+            """
+            INSERT INTO alerts (
+                source_type,
+                target,
+                event_type,
+                ip_address,
+                host,
+                url,
+                risk_score,
+                risk_level,
+                message,
+                description,
+                status,
+                failed_attempts,
+                targeted_users,
+                start_time,
+                end_time
+            )
+            VALUES (
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?
+            )
+            """,
+            (
+                alert.get("source_type"),
+                target,
+                alert.get("event_type"),
+                ip_address,
+                host,
+                url,
+                alert.get("risk_score"),
+                alert.get("risk_level"),
+                alert.get("message"),
+                alert.get("description"),
+                alert.get(
+                    "status",
+                    "OPEN"
+                ),
+                alert.get(
+                    "failed_attempts"
+                ),
+                targeted_users,
+                str(
+                    alert.get("start_time")
+                )
+                if alert.get("start_time")
+                is not None
+                else None,
+                str(
+                    alert.get("end_time")
+                )
+                if alert.get("end_time")
+                is not None
+                else None,
+            )
+        )
+
+        connection.commit()
+
+        return cursor.lastrowid
+
+    finally:
+
+        connection.close()
+
 
 def get_alerts() -> list[dict]:
     """
@@ -330,6 +393,20 @@ def get_alerts() -> list[dict]:
         alert["ip_address"] = decrypt_database_value(
             alert.get("ip_address")
 )
+       
+
+        alert["target"] = decrypt_database_value(
+            alert.get("target")
+)
+
+        alert["host"] = decrypt_database_value(
+            alert.get("host")
+)
+
+        alert["url"] = decrypt_database_value(
+            alert.get("url")
+        )
+
 
         # targeted_users est stocké en JSON.
         # On le reconvertit en liste Python.

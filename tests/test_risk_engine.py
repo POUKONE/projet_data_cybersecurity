@@ -437,3 +437,94 @@ def test_large_port_scan_is_critical():
 
     assert score == 80
     assert get_risk_level(score) == "CRITICAL"
+
+
+def test_log_alert_classification():
+
+    detection = {
+        "event_type": (
+            "FAILED_LOGIN_BURST"
+        ),
+        "ip_address": (
+            "192.168.1.50"
+        ),
+        "failed_attempts": 5,
+        "targeted_users": [
+            "admin"
+        ],
+    }
+
+    alert = build_security_alert(
+        detection
+    )
+
+    assert (
+        alert["source_type"]
+        == "LOG"
+    )
+
+    assert (
+        alert["target"]
+        == "192.168.1.50"
+    )
+
+    assert (
+        alert["status"]
+        == "OPEN"
+    )
+
+def test_web_alert_classification():
+
+    detection = {
+        "event_type": (
+            "CSP_MISSING"
+        ),
+        "url": (
+            "https://example.com"
+        ),
+    }
+
+    alert = build_security_alert(
+        detection
+    )
+
+    assert (
+        alert["source_type"]
+        == "WEB"
+    )
+
+    assert (
+        alert["target"]
+        == "https://example.com"
+    )
+
+    assert (
+        alert["url"]
+        == "https://example.com"
+    )
+
+def test_network_alert_classification():
+
+    detection = {
+        "event_type": (
+            "NEW_PORT_DETECTED"
+        ),
+        "host": (
+            "192.168.1.25"
+        ),
+        "port": 445,
+    }
+
+    alert = build_security_alert(
+        detection
+    )
+
+    assert (
+        alert["source_type"]
+        == "NETWORK"
+    )
+
+    assert (
+        alert["target"]
+        == "192.168.1.25"
+    )
