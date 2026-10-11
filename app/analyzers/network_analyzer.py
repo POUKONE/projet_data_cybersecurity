@@ -62,14 +62,22 @@ def run_network_analysis(
         return []
 
     # Comparaison des deux scans.
-    detections = detect_new_ports(
+    new_port_detections = detect_new_ports(
         previous_scan,
         current_scan
     )
 
+    new_service_detections = detect_new_services(
+        previous_scan,
+        current_scan
+    )
+    detections = (
+        new_port_detections
+        + new_service_detections
+)
     # Transformation en alertes + stockage SQLite.
     alerts = process_network_detections(
-        detections
+        detections + new_service_detections
     )
 
     return alerts
@@ -170,3 +178,70 @@ def detect_new_ports(
             )
 
     return new_ports
+
+def detect_new_services(
+    previous_scan: list[dict],
+    current_scan: list[dict]
+) -> list[dict]:
+    """
+    Détecte les changements ou nouveaux services
+    exposés sur des ports déjà connus.
+
+    Retour
+    ------
+    list[dict]
+        Liste des services nouvellement détectés.
+    """
+
+    previous_services = {
+        (
+            item.get("host"),
+            item.get("protocol"),
+            item.get("port")
+        ): item.get("service")
+        for item in previous_scan
+        if item.get("state") == "open"
+    }
+
+    detections = []
+
+    for item in current_scan:
+
+        if item.get("state") != "open":
+            continue
+
+        key = (
+            item.get("host"),
+            item.get("protocol"),
+            item.get("port")
+        )
+
+        current_service = item.get("service")
+
+        previous_service = previous_services.get(
+            key
+        )
+
+        # Le port existait déjà mais le service
+        # exposé a changé.
+        if (
+            previous_service is not None
+            and current_service != previous_service
+        ):
+
+            detections.append(
+                {
+                    "event_type": "NEW_SERVICE_DETECTED",
+                    "host": item.get("host"),
+                    "ip_address": item.get("host"),
+                    "protocol": item.get("protocol"),
+                    "port": item.get("port"),
+                    "state": item.get("state"),
+                    "service": current_service,
+                    "previous_service": previous_service,
+                    "product": item.get("product"),
+                    "version": item.get("version"),
+                }
+            )
+
+    return detections
