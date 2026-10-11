@@ -6,6 +6,72 @@ from app.analyzers.web_analyzer import (
     run_web_analysis
 )
 
+
+@patch(
+    "app.analyzers.web_analyzer.requests.get"
+)
+def test_missing_security_headers(
+    mock_get
+):
+    response = Mock()
+
+    response.url = "https://example.com"
+    response.status_code = 200
+    response.headers = {}
+
+    mock_get.return_value = response
+
+    detections = analyze_web_security(
+        "https://example.com"
+    )
+
+    event_types = {
+        detection["event_type"]
+        for detection in detections
+    }
+
+    assert "CSP_MISSING" in event_types
+    assert "HSTS_MISSING" in event_types
+    assert (
+        "X_CONTENT_TYPE_OPTIONS_MISSING"
+        in event_types
+    )
+    assert "X_FRAME_OPTIONS_MISSING" in event_types
+    assert "REFERRER_POLICY_MISSING" in event_types
+
+@patch(
+    "app.analyzers.web_analyzer.requests.get"
+)
+def test_all_security_headers_present(
+    mock_get
+):
+    response = Mock()
+
+    response.url = "https://example.com"
+    response.status_code = 200
+
+    response.headers = {
+        "Content-Security-Policy": (
+            "default-src 'self'"
+        ),
+        "Strict-Transport-Security": (
+            "max-age=31536000"
+        ),
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": (
+            "strict-origin-when-cross-origin"
+        )
+    }
+
+    mock_get.return_value = response
+
+    detections = analyze_web_security(
+        "https://example.com"
+    )
+
+    assert detections == []
+
 @patch(
     "app.analyzers.web_analyzer.save_alert"
 )
@@ -143,6 +209,12 @@ def test_csp_missing(
 def test_secure_web_configuration(
     mock_get
 ):
+    """
+    Vérifie qu'aucune alerte n'est générée
+    lorsque tous les headers de sécurité
+    attendus sont présents.
+    """
+
     response = Mock()
 
     response.url = "https://example.com"
@@ -151,6 +223,18 @@ def test_secure_web_configuration(
     response.headers = {
         "Content-Security-Policy": (
             "default-src 'self'"
+        ),
+        "Strict-Transport-Security": (
+            "max-age=31536000"
+        ),
+        "X-Content-Type-Options": (
+            "nosniff"
+        ),
+        "X-Frame-Options": (
+            "DENY"
+        ),
+        "Referrer-Policy": (
+            "strict-origin-when-cross-origin"
         )
     }
 

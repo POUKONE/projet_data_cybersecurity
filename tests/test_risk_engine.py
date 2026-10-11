@@ -366,3 +366,20 @@ def test_web_alert_creation():
     assert alert["status_code"] == 200
     assert alert["risk_score"] == 15
     assert alert["risk_level"] == "LOW"
+
+def test_hsts_missing_score():
+    detection = {
+        "event_type": "HSTS_MISSING",
+        "url": "https://example.com"
+    }
+
+    assert calculate_risk_score(detection) == 20
+
+
+def test_x_frame_options_missing_score():
+    detection = {
+        "event_type": "X_FRAME_OPTIONS_MISSING",
+        "url": "https://example.com"
+    }
+
+    assert calculate_risk_score(detection) == 15

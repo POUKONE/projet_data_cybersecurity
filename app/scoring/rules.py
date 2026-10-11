@@ -42,6 +42,39 @@ SECURITY_RULES = {
         ),
     },
 
+
+        "HSTS_MISSING": {
+        "base_score": 20,
+        "severity": "MEDIUM",
+        "description": (
+            "Le header Strict-Transport-Security est absent."
+        ),
+    },
+
+    "X_CONTENT_TYPE_OPTIONS_MISSING": {
+        "base_score": 10,
+        "severity": "LOW",
+        "description": (
+            "Le header X-Content-Type-Options est absent."
+        ),
+    },
+
+    "X_FRAME_OPTIONS_MISSING": {
+        "base_score": 15,
+        "severity": "MEDIUM",
+        "description": (
+            "Le header X-Frame-Options est absent."
+        ),
+    },
+
+    "REFERRER_POLICY_MISSING": {
+        "base_score": 10,
+        "severity": "LOW",
+        "description": (
+            "Le header Referrer-Policy est absent."
+        ),
+    },
+
     # --------------------------------------------------------
     # Nouveau service réseau détecté
     # --------------------------------------------------------
