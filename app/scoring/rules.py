@@ -58,6 +58,14 @@ SECURITY_RULES = {
             "Le header Content-Security-Policy est absent."
         ),
     },
+
+    "NEW_PORT_DETECTED": {
+    "base_score": 20,
+    "description": (
+        "Un nouveau port ouvert a été détecté "
+        "sur un hôte du réseau."
+    )
+},
 }
 
 def get_rule(event_type: str) -> dict | None :
