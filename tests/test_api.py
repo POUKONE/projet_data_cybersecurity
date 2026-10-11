@@ -8,8 +8,121 @@ from app.api.main import app
 from app.database.db import initialize_database
 from app.security.crypto_utils import generate_key
 
+from unittest.mock import patch
 
 client = TestClient(app)
+
+@patch(
+    "app.api.main.get_latest_network_scan"
+)
+def test_network_scans_endpoint(
+    mock_get_scan
+):
+    """
+    Vérifie la récupération
+    du dernier scan réseau.
+    """
+
+    mock_get_scan.return_value = [
+        {
+            "host": "127.0.0.1",
+            "protocol": "tcp",
+            "port": 445,
+            "state": "open",
+            "service": "microsoft-ds",
+            "product": "",
+            "version": ""
+        }
+    ]
+
+    response = client.get(
+        "/network/scans"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["count"] == 1
+    assert data["scan"][0]["port"] == 445
+
+@patch(
+    "app.api.main.run_network_analysis"
+)
+def test_launch_network_scan(
+    mock_run_network
+):
+    """
+    Vérifie l'endpoint de lancement Nmap
+    sans effectuer de vrai scan pendant le test.
+    """
+
+    mock_run_network.return_value = [
+        {
+            "event_type": "NEW_PORT_DETECTED",
+            "port": 1521,
+            "risk_score": 40,
+            "risk_level": "MEDIUM"
+        }
+    ]
+
+    response = client.post(
+        "/network/scan",
+        json={
+            "target": "127.0.0.1"
+        }
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["target"] == "127.0.0.1"
+    assert data["alert_count"] == 1
+
+    mock_run_network.assert_called_once_with(
+        "127.0.0.1"
+    )
+
+@patch(
+    "app.api.main.run_web_analysis"
+)
+def test_launch_web_audit(
+    mock_run_web
+):
+    """
+    Vérifie le lancement d'un audit Web
+    sans envoyer de vraie requête HTTP.
+    """
+
+    mock_run_web.return_value = [
+        {
+            "event_type": "CSP_MISSING",
+            "url": "https://example.com",
+            "risk_score": 15,
+            "risk_level": "LOW"
+        }
+    ]
+
+    response = client.post(
+        "/web/audit",
+        json={
+            "url": "https://example.com"
+        }
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["url"] == "https://example.com"
+    assert data["alert_count"] == 1
+
+    mock_run_web.assert_called_once_with(
+        "https://example.com"
+    )
+
+
 
 
 @pytest.fixture(autouse=True)

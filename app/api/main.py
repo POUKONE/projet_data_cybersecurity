@@ -1,24 +1,54 @@
 """
 API principale du projet Data & Cybersécurité.
 
-Cette API permettra notamment :
+Cette API permet notamment :
 - de vérifier l'état de l'application ;
 - de récupérer les alertes ;
-- de récupérer les événements de sécurité ;
-- d'exposer les analyses au dashboard.
+- de récupérer les événements ;
+- de récupérer les scans réseau ;
+- de lancer une analyse Nmap ;
+- de lancer un audit Web.
 """
 
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 from app.database.db import (
     initialize_database,
     get_alerts,
     get_security_events,
+    get_latest_network_scan,
+)
+
+from app.analyzers.network_analyzer import (
+    run_network_analysis,
+)
+
+from app.analyzers.web_analyzer import (
+    run_web_analysis,
 )
 
 
 # ============================================================
-# APPLICATION
+# LIFESPAN
+# ============================================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Initialise les ressources nécessaires
+    au démarrage de l'application.
+    """
+
+    initialize_database()
+
+    yield
+
+
+# ============================================================
+# APPLICATION FASTAPI
 # ============================================================
 
 app = FastAPI(
@@ -27,25 +57,35 @@ app = FastAPI(
         "API de supervision et d'analyse "
         "des événements de cybersécurité."
     ),
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 
 # ============================================================
-# INITIALISATION
+# MODÈLES DE REQUÊTES
 # ============================================================
 
-@app.on_event("startup")
-def startup_event():
+class NetworkScanRequest(BaseModel):
     """
-    Initialise SQLite au démarrage de l'API.
+    Requête utilisée pour lancer
+    une analyse réseau.
     """
 
-    initialize_database()
+    target: str
+
+
+class WebAuditRequest(BaseModel):
+    """
+    Requête utilisée pour lancer
+    un audit Web.
+    """
+
+    url: str
 
 
 # ============================================================
-# HEALTH CHECK
+# ROUTE PRINCIPALE
 # ============================================================
 
 @app.get("/")
@@ -62,10 +102,14 @@ def root():
     }
 
 
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
 @app.get("/health")
 def health():
     """
-    Endpoint de supervision de l'API.
+    Vérifie l'état de santé de l'API.
     """
 
     return {
@@ -98,7 +142,7 @@ def list_alerts():
 @app.get("/events")
 def list_events():
     """
-    Retourne les événements de sécurité.
+    Retourne tous les événements de sécurité.
     """
 
     events = get_security_events()
@@ -107,3 +151,101 @@ def list_events():
         "count": len(events),
         "events": events
     }
+
+
+# ============================================================
+# DERNIER SCAN RÉSEAU
+# ============================================================
+
+@app.get("/network/scans")
+def latest_network_scan():
+    """
+    Retourne le dernier scan réseau
+    enregistré dans SQLite.
+    """
+
+    scan = get_latest_network_scan()
+
+    return {
+        "count": len(scan),
+        "scan": scan
+    }
+
+
+# ============================================================
+# LANCEMENT D'UN SCAN NMAP
+# ============================================================
+
+@app.post("/network/scan")
+def launch_network_scan(
+    request: NetworkScanRequest
+):
+    """
+    Lance le pipeline réseau complet.
+
+    Nmap
+    → comparaison
+    → détection
+    → scoring
+    → alertes
+    → SQLite
+    """
+
+    try:
+
+        alerts = run_network_analysis(
+            request.target
+        )
+
+        return {
+            "target": request.target,
+            "alert_count": len(alerts),
+            "alerts": alerts
+        }
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+
+# ============================================================
+# AUDIT WEB
+# ============================================================
+
+@app.post("/web/audit")
+def launch_web_audit(
+    request: WebAuditRequest
+):
+    """
+    Lance un audit de sécurité Web.
+
+    Vérifications actuelles :
+    - HTTPS ;
+    - CSP ;
+    - HSTS ;
+    - X-Content-Type-Options ;
+    - X-Frame-Options ;
+    - Referrer-Policy.
+    """
+
+    try:
+
+        alerts = run_web_analysis(
+            request.url
+        )
+
+        return {
+            "url": request.url,
+            "alert_count": len(alerts),
+            "alerts": alerts
+        }
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
