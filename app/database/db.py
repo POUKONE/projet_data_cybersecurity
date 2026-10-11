@@ -7,10 +7,17 @@ Ce module permet :
 - de créer les premières tables du projet.
 """
 
+from asyncio import events
+from asyncio import events
 import sqlite3
 from pathlib import Path
 import json
 from datetime import datetime
+
+from app.security.crypto_utils import (
+    encrypt_sensitive_text,
+    decrypt_sensitive_text
+)
 
 # ============================================================
 # CONFIGURATION
@@ -130,6 +137,52 @@ def initialize_database() -> None:
     # Fermeture propre de la connexion.
     connection.close()
 
+def encrypt_database_value(
+    value: str | None
+) -> str | None:
+    """
+    Chiffre une valeur avant stockage SQLite.
+
+    Le préfixe ENC: permet de savoir
+    qu'une valeur est chiffrée.
+    """
+
+    if value is None:
+        return None
+
+    value = str(value)
+
+    encrypted = encrypt_sensitive_text(
+        value
+    )
+
+    return f"ENC:{encrypted}"
+
+
+def decrypt_database_value(
+    value: str | None
+) -> str | None:
+    """
+    Déchiffre une valeur provenant de SQLite.
+
+    Les anciennes valeurs non chiffrées
+    restent compatibles.
+    """
+
+    if value is None:
+        return None
+
+    # Anciennes données enregistrées
+    # avant l'ajout du chiffrement.
+    if not value.startswith("ENC:"):
+        return value
+
+    encrypted_value = value[4:]
+
+    return decrypt_sensitive_text(
+        encrypted_value
+    )
+
 def save_alert(alert: dict) -> int:
     """
     Enregistre une alerte de sécurité dans SQLite.
@@ -189,6 +242,10 @@ def save_alert(alert: dict) -> int:
     if end_time is not None:
         end_time = str(end_time)
 
+    ip_address = encrypt_database_value(
+        alert.get("ip_address")
+)
+
     # --------------------------------------------------------
     # Insertion SQL
     # --------------------------------------------------------
@@ -210,7 +267,7 @@ def save_alert(alert: dict) -> int:
         """,
         (
             alert.get("event_type"),
-            alert.get("ip_address"),
+            ip_address,
             alert.get("risk_score", 0),
             alert.get("risk_level"),
             alert.get("description"),
@@ -270,6 +327,10 @@ def get_alerts() -> list[dict]:
         # Conversion sqlite3.Row -> dictionnaire Python.
         alert = dict(row)
 
+        alert["ip_address"] = decrypt_database_value(
+            alert.get("ip_address")
+)
+
         # targeted_users est stocké en JSON.
         # On le reconvertit en liste Python.
         if alert.get("targeted_users"):
@@ -311,6 +372,11 @@ def save_security_event(event: dict) -> int:
     if timestamp is not None:
         timestamp = str(timestamp)
 
+
+    ip_address = encrypt_database_value(
+        event.get("ip_address")
+)
+
     cursor.execute(
         """
         INSERT INTO security_events (
@@ -323,7 +389,7 @@ def save_security_event(event: dict) -> int:
         """,
         (
             event.get("event_type"),
-            event.get("ip_address"),
+            ip_address,
             timestamp,
             event.get("message")
         )
@@ -362,11 +428,22 @@ def get_security_events() -> list[dict]:
     rows = cursor.fetchall()
 
     connection.close()
+    events = []
 
-    return [
-        dict(row)
-        for row in rows
-    ]
+    for row in rows:
+
+        event = dict(row)
+
+        event["ip_address"] = decrypt_database_value(
+            event.get("ip_address")
+    )
+
+        events.append(
+            event
+    )
+
+    return events
+    
 
 def save_network_scan(
     scan_results: list[dict],

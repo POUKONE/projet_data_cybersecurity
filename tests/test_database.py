@@ -1,6 +1,50 @@
 import sqlite3
 import uuid
 
+import pytest
+
+import app.database.db as db_module
+
+from app.security.crypto_utils import generate_key
+
+@pytest.fixture(autouse=True)
+def isolated_database(
+    tmp_path,
+    monkeypatch
+):
+    """
+    Chaque test utilise :
+    - sa propre base SQLite temporaire ;
+    - sa propre clé Fernet temporaire.
+
+    Cela évite :
+    - de modifier la vraie base du projet ;
+    - les conflits entre anciennes et nouvelles clés ;
+    - la dépendance au fichier .env.
+    """
+
+    # Base SQLite temporaire propre au test.
+    temporary_database = (
+        tmp_path
+        / "test_security_project.db"
+    )
+
+    # Remplacement du chemin utilisé
+    # par app.database.db.
+    monkeypatch.setattr(
+        db_module,
+        "DATABASE_PATH",
+        temporary_database
+    )
+
+    # Clé Fernet temporaire pour le test.
+    key = generate_key()
+
+    monkeypatch.setenv(
+        "FERNET_KEY",
+        key.decode("utf-8")
+    )
+
 from app.database.db import (
     get_connection,
     initialize_database,
@@ -13,6 +57,114 @@ from app.database.db import (
     get_latest_network_scan,
     get_last_two_network_scans
 )
+
+def test_alert_ip_is_encrypted_in_database(
+    monkeypatch
+):
+    """
+    Vérifie que l'adresse IP n'est pas stockée
+    en clair dans SQLite.
+    """
+
+    key = generate_key()
+
+    monkeypatch.setenv(
+        "FERNET_KEY",
+        key.decode("utf-8")
+    )
+
+    initialize_database()
+
+    alert = {
+        "event_type": "FAILED_LOGIN_BURST",
+        "ip_address": "192.168.1.99",
+        "risk_score": 40,
+        "risk_level": "MEDIUM",
+        "description": "Test chiffrement.",
+        "failed_attempts": 5,
+        "targeted_users": ["admin"],
+        "start_time": "2026-10-11 10:00:00",
+        "end_time": "2026-10-11 10:01:00"
+    }
+
+    alert_id = save_alert(
+        alert
+    )
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT ip_address
+        FROM alerts
+        WHERE id = ?
+        """,
+        (
+            alert_id,
+        )
+    )
+
+    row = cursor.fetchone()
+
+    connection.close()
+
+    stored_ip = row["ip_address"]
+
+    # L'adresse IP ne doit pas apparaître
+    # en clair dans SQLite.
+    assert stored_ip != "192.168.1.99"
+
+    assert stored_ip.startswith(
+        "ENC:"
+    )
+
+def test_alert_ip_is_decrypted_when_read(
+    monkeypatch
+):
+    """
+    Vérifie que get_alerts() retourne
+    l'adresse IP originale.
+    """
+
+    key = generate_key()
+
+    monkeypatch.setenv(
+        "FERNET_KEY",
+        key.decode("utf-8")
+    )
+
+    initialize_database()
+
+    alert = {
+        "event_type": "FAILED_LOGIN_BURST",
+        "ip_address": "10.0.0.77",
+        "risk_score": 40,
+        "risk_level": "MEDIUM",
+        "description": "Test déchiffrement.",
+        "failed_attempts": 5,
+        "targeted_users": ["admin"],
+        "start_time": None,
+        "end_time": None
+    }
+
+    alert_id = save_alert(
+        alert
+    )
+
+    alerts = get_alerts()
+
+    saved_alert = next(
+        item
+        for item in alerts
+        if item["id"] == alert_id
+    )
+
+    assert (
+        saved_alert["ip_address"]
+        == "10.0.0.77"
+    )
+
 
 
 def test_database_creation():
