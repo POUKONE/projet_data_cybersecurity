@@ -307,3 +307,62 @@ def test_new_service_score():
     assert score == 25
 
     assert get_risk_level(score) == "LOW"
+
+def test_https_missing_score():
+    """
+    Vérifie le score de l'absence de HTTPS.
+    """
+
+    detection = {
+        "event_type": "HTTPS_MISSING",
+        "url": "http://example.com"
+    }
+
+    score = calculate_risk_score(
+        detection
+    )
+
+    assert score == 30
+    assert get_risk_level(score) == "MEDIUM"
+
+def test_csp_missing_score():
+    """
+    Vérifie le score de l'absence de CSP.
+    """
+
+    detection = {
+        "event_type": "CSP_MISSING",
+        "url": "https://example.com"
+    }
+
+    score = calculate_risk_score(
+        detection
+    )
+
+    assert score == 15
+    assert get_risk_level(score) == "LOW"
+
+def test_web_alert_creation():
+    """
+    Vérifie la création d'une alerte Web.
+    """
+
+    detection = {
+        "event_type": "CSP_MISSING",
+        "url": "https://example.com",
+        "status_code": 200,
+        "message": (
+            "Le header Content-Security-Policy "
+            "est absent."
+        )
+    }
+
+    alert = build_security_alert(
+        detection
+    )
+
+    assert alert["event_type"] == "CSP_MISSING"
+    assert alert["url"] == "https://example.com"
+    assert alert["status_code"] == 200
+    assert alert["risk_score"] == 15
+    assert alert["risk_level"] == "LOW"

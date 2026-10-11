@@ -9,7 +9,61 @@ Ce module permet :
 """
 
 import requests
+from app.scoring.risk_engine import build_security_alert
+from app.database.db import save_alert
 
+def process_web_detections(
+    detections: list[dict]
+) -> list[dict]:
+    """
+    Transforme les détections Web en alertes
+    puis les enregistre dans SQLite.
+    """
+
+    alerts = []
+
+    for detection in detections:
+
+        # Création de l'alerte avec
+        # score et niveau de risque.
+        alert = build_security_alert(
+            detection
+        )
+
+        # Enregistrement en base.
+        save_alert(
+            alert
+        )
+
+        alerts.append(
+            alert
+        )
+
+    return alerts
+
+def run_web_analysis(
+    url: str
+) -> list[dict]:
+    """
+    Lance l'audit Web complet.
+
+    Étapes :
+    - analyse de l'URL ;
+    - détection des problèmes ;
+    - scoring ;
+    - génération des alertes ;
+    - stockage SQLite.
+    """
+
+    detections = analyze_web_security(
+        url
+    )
+
+    alerts = process_web_detections(
+        detections
+    )
+
+    return alerts
 
 def analyze_web_security(
     url: str,

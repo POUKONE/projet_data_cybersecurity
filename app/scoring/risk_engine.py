@@ -160,6 +160,11 @@ def build_security_alert(detection: dict) -> dict:
         "product": detection.get("product"),
         "version": detection.get("version"),
 
+        # Informations Web
+        "url": detection.get("url"),
+        "status_code": detection.get("status_code"),
+        "message": detection.get("message"),
+
         # Informations utiles si disponibles.
         "ip_address": detection.get(
             "ip_address"

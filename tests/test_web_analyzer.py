@@ -1,9 +1,87 @@
 from unittest.mock import patch, Mock
 
 from app.analyzers.web_analyzer import (
-    analyze_web_security
+    analyze_web_security,
+    process_web_detections,
+    run_web_analysis
 )
 
+@patch(
+    "app.analyzers.web_analyzer.save_alert"
+)
+def test_process_web_detections(
+    mock_save_alert
+):
+    """
+    Vérifie qu'une détection Web devient
+    une alerte puis est envoyée vers SQLite.
+    """
+
+    detections = [
+        {
+            "event_type": "CSP_MISSING",
+            "url": "https://example.com",
+            "status_code": 200,
+            "message": "CSP absent."
+        }
+    ]
+
+    alerts = process_web_detections(
+        detections
+    )
+
+    assert len(alerts) == 1
+
+    assert alerts[0]["risk_score"] == 15
+    assert alerts[0]["risk_level"] == "LOW"
+
+    mock_save_alert.assert_called_once()
+
+@patch(
+    "app.analyzers.web_analyzer.process_web_detections"
+)
+@patch(
+    "app.analyzers.web_analyzer.analyze_web_security"
+)
+def test_run_web_analysis(
+    mock_analyze,
+    mock_process
+):
+    """
+    Vérifie le pipeline Web complet.
+    """
+
+    detections = [
+        {
+            "event_type": "HTTPS_MISSING",
+            "url": "http://example.com"
+        }
+    ]
+
+    expected_alerts = [
+        {
+            "event_type": "HTTPS_MISSING",
+            "risk_score": 30,
+            "risk_level": "MEDIUM"
+        }
+    ]
+
+    mock_analyze.return_value = detections
+    mock_process.return_value = expected_alerts
+
+    alerts = run_web_analysis(
+        "http://example.com"
+    )
+
+    assert alerts == expected_alerts
+
+    mock_analyze.assert_called_once_with(
+        "http://example.com"
+    )
+
+    mock_process.assert_called_once_with(
+        detections
+    )
 
 @patch(
     "app.analyzers.web_analyzer.requests.get"
