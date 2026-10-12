@@ -420,37 +420,40 @@ def test_redirect_is_recorded(
     mock_get
 ):
     """
-    Vérifie que les redirections internes au scope
-    sont enregistrées dans le rapport.
+    Vérifie qu'une redirection interne au scope
+    est correctement suivie et enregistrée.
 
-    La version actuelle effectue :
-    - une collecte pendant le crawl ;
-    - une seconde collecte pendant l'analyse.
+    La réponse obtenue pendant le crawl est ensuite
+    réutilisée par les analyseurs.
     """
 
     # ========================================================
-    # PREMIÈRE REDIRECTION : CRAWL
+    # REDIRECTION
     # ========================================================
 
-    redirect_response_crawl = Mock()
+    redirect_response = Mock()
 
-    redirect_response_crawl.status_code = 301
+    redirect_response.status_code = 301
 
-    redirect_response_crawl.headers = {
+    redirect_response.headers = {
         "Location": (
             "https://example.com"
         )
     }
 
-    redirect_response_crawl.is_redirect = True
-    redirect_response_crawl.is_permanent_redirect = True
+    redirect_response.is_redirect = True
+    redirect_response.is_permanent_redirect = True
 
 
-    final_response_crawl = Mock()
+    # ========================================================
+    # RÉPONSE FINALE
+    # ========================================================
 
-    final_response_crawl.status_code = 200
+    final_response = Mock()
 
-    final_response_crawl.headers = {
+    final_response.status_code = 200
+
+    final_response.headers = {
         "Content-Type": "text/html",
 
         "Content-Security-Policy": (
@@ -474,85 +477,25 @@ def test_redirect_is_recorded(
         ),
     }
 
-    final_response_crawl.cookies = (
+    final_response.cookies = (
         RequestsCookieJar()
     )
 
-    final_response_crawl.text = (
+    final_response.text = (
         "<html></html>"
     )
 
-    final_response_crawl.is_redirect = False
-    final_response_crawl.is_permanent_redirect = False
+    final_response.is_redirect = False
+    final_response.is_permanent_redirect = False
 
 
     # ========================================================
-    # DEUXIÈME REDIRECTION : ANALYSE
-    # ========================================================
-
-    redirect_response_analysis = Mock()
-
-    redirect_response_analysis.status_code = 301
-
-    redirect_response_analysis.headers = {
-        "Location": (
-            "https://example.com"
-        )
-    }
-
-    redirect_response_analysis.is_redirect = True
-    redirect_response_analysis.is_permanent_redirect = True
-
-
-    final_response_analysis = Mock()
-
-    final_response_analysis.status_code = 200
-
-    final_response_analysis.headers = {
-        "Content-Type": "text/html",
-
-        "Content-Security-Policy": (
-            "default-src 'self'"
-        ),
-
-        "Strict-Transport-Security": (
-            "max-age=31536000"
-        ),
-
-        "X-Content-Type-Options": (
-            "nosniff"
-        ),
-
-        "X-Frame-Options": (
-            "DENY"
-        ),
-
-        "Referrer-Policy": (
-            "same-origin"
-        ),
-    }
-
-    final_response_analysis.cookies = (
-        RequestsCookieJar()
-    )
-
-    final_response_analysis.text = (
-        "<html></html>"
-    )
-
-    final_response_analysis.is_redirect = False
-    final_response_analysis.is_permanent_redirect = False
-
-
-    # ========================================================
-    # ORDRE DES APPELS HTTP
+    # ORDRE DES APPELS
     # ========================================================
 
     mock_get.side_effect = [
-        redirect_response_crawl,
-        final_response_crawl,
-        redirect_response_analysis,
-        final_response_analysis,
+        redirect_response,
+        final_response,
     ]
 
 
@@ -605,18 +548,17 @@ def test_redirect_is_recorded(
     )
 
 
-    # 2 requêtes pendant le crawl
-    # +
-    # 2 requêtes pendant l'analyse
+    # Une requête HTTP initiale
+    # + une requête après redirection.
     assert (
         report["request_count"]
-        == 4
+        == 2
     )
 
 
     assert (
         mock_get.call_count
-        == 4
+        == 2
     )
 
 

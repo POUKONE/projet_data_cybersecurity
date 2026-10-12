@@ -98,7 +98,7 @@ def test_passive_web_audit_integration(
 
     assert (
         result["request_count"]
-        == 2
+        == 1
     )
 
 

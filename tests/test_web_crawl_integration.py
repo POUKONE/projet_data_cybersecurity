@@ -55,11 +55,14 @@ def test_multi_page_passive_audit(
     mock_get
 ):
     """
-    Vérifie qu'un audit passif peut analyser
-    plusieurs pages du même domaine.
+    Vérifie qu'un audit passif multi-pages :
+    - visite plusieurs pages ;
+    - ne télécharge chaque page qu'une seule fois ;
+    - analyse les formulaires ;
+    - agrège les findings.
     """
 
-    root_for_crawl = build_response(
+    root_response = build_response(
         """
         <html>
             <body>
@@ -78,7 +81,7 @@ def test_multi_page_passive_audit(
     )
 
 
-    login_for_crawl = build_response(
+    login_response = build_response(
         """
         <html>
             <body>
@@ -106,57 +109,7 @@ def test_multi_page_passive_audit(
     )
 
 
-    about_for_crawl = build_response(
-        """
-        <html>
-            <body>
-                About
-            </body>
-        </html>
-        """
-    )
-
-
-    root_for_analysis = build_response(
-        """
-        <html>
-            <body>
-                Root
-            </body>
-        </html>
-        """
-    )
-
-
-    login_for_analysis = build_response(
-        """
-        <html>
-            <body>
-
-                <form
-                    action="/login"
-                    method="post"
-                >
-
-                    <input
-                        type="text"
-                        name="username"
-                    >
-
-                    <input
-                        type="password"
-                        name="password"
-                    >
-
-                </form>
-
-            </body>
-        </html>
-        """
-    )
-
-
-    about_for_analysis = build_response(
+    about_response = build_response(
         """
         <html>
             <body>
@@ -168,15 +121,9 @@ def test_multi_page_passive_audit(
 
 
     mock_get.side_effect = [
-        # Crawl
-        root_for_crawl,
-        login_for_crawl,
-        about_for_crawl,
-
-        # Analyse page par page
-        root_for_analysis,
-        login_for_analysis,
-        about_for_analysis,
+        root_response,
+        login_response,
+        about_response,
     ]
 
 
@@ -270,7 +217,14 @@ def test_multi_page_passive_audit(
     )
 
 
+    # 3 pages visitées = 3 requêtes HTTP.
     assert (
         report["request_count"]
-        == 6
+        == 3
+    )
+
+
+    assert (
+        mock_get.call_count
+        == 3
     )

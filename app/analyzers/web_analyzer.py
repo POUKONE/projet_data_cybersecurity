@@ -39,7 +39,6 @@ from app.analyzers.web_checks.tls import (
 from app.collectors.web_collector import (
     WebCollectionError,
     crawl_site,
-    request_with_scope,
     validate_url,
 )
 from app.database.db import (
@@ -977,72 +976,31 @@ def analyze_web_security(
 
 
         # ----------------------------------------------------
-        # RÉCUPÉRER LA RÉPONSE POUR LES CHECKS
+        # RÉUTILISER LA RÉPONSE DU CRAWLER
         # ----------------------------------------------------
         #
-        # crawl_site() stocke volontairement uniquement
-        # les métadonnées de chaque page.
-        # On effectue ici une seconde collecte contrôlée
-        # pour récupérer le body/headers nécessaires
-        # aux analyseurs.
-        #
-        # Cette architecture sera optimisée ensuite
-        # pour éviter les doubles requêtes.
+        # crawl_site() a déjà téléchargé cette page.
+        # On réutilise directement la réponse HTTP afin
+        # d'éviter une seconde requête réseau.
         # ----------------------------------------------------
 
-        try:
-
-            collection = (
-                request_with_scope(
-                    url=page_url,
-                    allowed_domains=scope,
-                    timeout=timeout,
-                )
-            )
+        response = page.get(
+            "_response"
+        )
 
 
-            response = (
-                collection[
-                    "response"
-                ]
-            )
-
-
-            report["request_count"] += (
-                collection.get(
-                    "request_count",
-                    0,
-                )
-            )
-
-
-            analyze_page(
-                report=report,
-                response=response,
-                requested_url=page_url,
-                final_url=(
-                    collection.get(
-                        "final_url",
-                        final_url,
-                    )
-                ),
-            )
-
-
-        except WebCollectionError as error:
+        if response is None:
 
             report["errors"].append(
                 {
                     "type": (
-                        get_collection_error_type(
-                            str(
-                                error
-                            )
-                        )
+                        "MISSING_PAGE_RESPONSE"
                     ),
 
-                    "message": str(
-                        error
+                    "message": (
+                        "La réponse HTTP collectée "
+                        "n'est pas disponible pour "
+                        "l'analyse de la page."
                     ),
 
                     "url": page_url,
@@ -1064,14 +1022,28 @@ def analyze_web_security(
                         "INDETERMINATE"
                     ),
 
-                    "message": str(
-                        error
+                    "message": (
+                        "Réponse HTTP indisponible."
                     ),
 
                     "url": page_url,
                 }
             )
 
+
+            continue
+
+
+        analyze_page(
+            report=report,
+
+            response=response,
+
+            requested_url=page_url,
+
+            final_url=final_url,
+        )
+        
 
     # ========================================================
     # FINALISATION

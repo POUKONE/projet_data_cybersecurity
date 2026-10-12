@@ -815,21 +815,33 @@ def crawl_site(
 
         page = {
             "url": current_url,
+
             "final_url": final_url,
+
             "depth": depth,
+
             "status_code": (
                 response.status_code
-            ),
+    ),
+
             "content_type": (
                 content_type
-            ),
+    ),
+
             "redirects": (
                 collection.get(
                     "redirects",
                     []
-                )
-            ),
-        }
+        )
+    ),
+
+    # Réponse conservée uniquement pour
+    # l'analyse interne.
+    #
+    # Elle ne sera pas ajoutée au rapport final
+    # retourné par l'API.
+    "_response": response,
+}
 
 
         pages.append(
