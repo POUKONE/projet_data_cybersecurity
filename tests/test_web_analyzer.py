@@ -142,8 +142,9 @@ def test_run_web_analysis(
     assert alerts == expected_alerts
 
     mock_analyze.assert_called_once_with(
-        "http://example.com"
-    )
+        url="http://example.com",
+        timeout=10
+)
 
     mock_process.assert_called_once_with(
         detections

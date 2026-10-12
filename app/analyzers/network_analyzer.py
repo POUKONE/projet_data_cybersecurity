@@ -120,68 +120,123 @@ def detect_new_ports(
     """
     Compare deux scans réseau et détecte
     les nouveaux ports ouverts.
-
-    Paramètres
-    ----------
-    previous_scan : list[dict]
-        Résultats du scan précédent.
-
-    current_scan : list[dict]
-        Résultats du scan actuel.
-
-    Retour
-    ------
-    list[dict]
-        Liste des nouveaux ports détectés.
     """
 
-    # Ensemble des couples :
-    # (host, protocol, port)
+    detections = []
+
     previous_ports = {
         (
             item.get("host"),
             item.get("protocol"),
-            item.get("port")
+            item.get("port"),
         )
         for item in previous_scan
-        if item.get("state") == "open"
+        if str(
+            item.get(
+                "state",
+                ""
+            )
+        ).lower()
+        == "open"
     }
 
-    new_ports = []
+    for current_item in current_scan:
 
-    for item in current_scan:
-
-        # On ignore les ports qui ne sont pas ouverts.
-        if item.get("state") != "open":
+        # On ne considère que les ports ouverts.
+        if (
+            str(
+                current_item.get(
+                    "state",
+                    ""
+                )
+            ).lower()
+            != "open"
+        ):
             continue
 
-        port_key = (
-            item.get("host"),
-            item.get("protocol"),
-            item.get("port")
+        current_key = (
+            current_item.get("host"),
+            current_item.get("protocol"),
+            current_item.get("port"),
         )
 
-        # Si ce port n'existait pas dans le scan précédent,
-        # alors il est considéré comme nouveau.
-        if port_key not in previous_ports:
+        if current_key not in previous_ports:
+
+            host = current_item.get(
+                "host"
+            )
+
+            port = current_item.get(
+                "port"
+            )
+
+            service = current_item.get(
+                "service"
+            )
 
             detection = {
-                "event_type": "NEW_PORT_DETECTED",
-                "host": item.get("host"),
-                "ip_address": item.get("host"),
-                "protocol": item.get("protocol"),
-                "port": item.get("port"),
-                "state": item.get("state"),
-                "service": item.get("service"),
-                "product": item.get("product"),
-                "version": item.get("version"),
+                "event_type": (
+                    "NEW_PORT_DETECTED"
+                ),
+
+                "source_type": (
+                    "NETWORK"
+                ),
+
+                "target": host,
+
+                "host": host,
+
+                "ip_address": host,
+
+                "protocol": (
+                    current_item.get(
+                        "protocol"
+                    )
+                ),
+
+                "port": port,
+
+                "state": (
+                    current_item.get(
+                        "state"
+                    )
+                ),
+
+                "service": service,
+
+                "product": (
+                    current_item.get(
+                        "product"
+                    )
+                ),
+
+                "version": (
+                    current_item.get(
+                        "version"
+                    )
+                ),
+
+                "message": (
+                    f"Nouveau port {port} "
+                    f"détecté sur {host}."
+                ),
+
+                "description": (
+                    f"Le port {port} est ouvert "
+                    f"dans le nouveau scan réseau "
+                    f"mais n'était pas présent "
+                    f"dans le scan précédent."
+                ),
+
+                "status": "OPEN",
             }
 
-            new_ports.append(
+            detections.append(
                 detection
             )
 
-    return new_ports
+    return detections
 
 def detect_new_services(
     previous_scan: list[dict],

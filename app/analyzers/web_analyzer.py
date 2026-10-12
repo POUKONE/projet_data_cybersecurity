@@ -1,60 +1,97 @@
 """
 Analyse de sécurité Web.
 
-Ce module permet :
-- de vérifier l'utilisation de HTTPS ;
-- de vérifier plusieurs headers de sécurité ;
-- de générer des détections exploitables
-  par le moteur de scoring ;
-- de transformer ces détections en alertes ;
-- d'enregistrer les alertes dans SQLite.
+Ce module permet notamment de vérifier :
+- l'utilisation de HTTPS ;
+- la présence de Content-Security-Policy ;
+- la présence de HSTS ;
+- la présence de X-Content-Type-Options ;
+- la présence de X-Frame-Options ;
+- la présence de Referrer-Policy.
+
+Les détections sont ensuite transformées
+en alertes normalisées et enregistrées dans SQLite.
 """
 
 import requests
 
-from app.scoring.risk_engine import build_security_alert
 from app.database.db import save_alert
+from app.scoring.risk_engine import build_security_alert
 
+
+# ============================================================
+# ANALYSE WEB
+# ============================================================
 
 def analyze_web_security(
     url: str,
     timeout: int = 10
 ) -> list[dict]:
     """
-    Analyse les principaux éléments de sécurité
-    d'une URL.
+    Analyse les principaux éléments de sécurité HTTP.
 
     Paramètres
     ----------
     url : str
-        URL à analyser.
+        URL du site à analyser.
 
     timeout : int
-        Temps maximum d'attente de la requête.
+        Temps maximum d'attente de la requête HTTP.
 
     Retour
     ------
     list[dict]
-        Liste des problèmes de sécurité détectés.
+        Liste des détections de sécurité.
     """
 
     detections = []
 
+
     # ========================================================
-    # VÉRIFICATION HTTPS
+    # VÉRIFICATION DE L'URL
     # ========================================================
 
-    if not url.lower().startswith("https://"):
+    if not url:
+        return detections
+
+
+    url = url.strip()
+
+
+    # ========================================================
+    # HTTPS
+    # ========================================================
+
+    if not url.lower().startswith(
+        "https://"
+    ):
 
         detections.append(
             {
-                "event_type": "HTTPS_MISSING",
+                "event_type": (
+                    "HTTPS_MISSING"
+                ),
+
+                "source_type": "WEB",
+
+                "target": url,
+
                 "url": url,
+
                 "message": (
-                    "L'URL analysée n'utilise pas HTTPS."
-                )
+                    "Le site analysé "
+                    "n'utilise pas HTTPS."
+                ),
+
+                "description": (
+                    "La communication avec le site "
+                    "n'est pas protégée par HTTPS."
+                ),
+
+                "status": "OPEN",
             }
         )
+
 
     # ========================================================
     # REQUÊTE HTTP
@@ -72,200 +109,332 @@ def analyze_web_security(
 
         return [
             {
-                "event_type": "WEB_REQUEST_ERROR",
+                "event_type": (
+                    "WEB_REQUEST_ERROR"
+                ),
+
+                "source_type": "WEB",
+
+                "target": url,
+
                 "url": url,
-                "message": str(error)
+
+                "message": (
+                    "Impossible d'accéder "
+                    "au site analysé."
+                ),
+
+                "description": str(
+                    error
+                ),
+
+                "status": "OPEN",
             }
         ]
+
+
+    # ========================================================
+    # URL FINALE
+    # ========================================================
+
+    final_url = str(
+        response.url
+    )
+
+
+    # ========================================================
+    # HEADERS
+    # ========================================================
+
+    headers = response.headers
+
 
     # ========================================================
     # CONTENT SECURITY POLICY
     # ========================================================
 
-    csp = response.headers.get(
-        "Content-Security-Policy"
-    )
-
-    if not csp:
-
-        detections.append(
-            {
-                "event_type": "CSP_MISSING",
-                "url": response.url,
-                "status_code": response.status_code,
-                "message": (
-                    "Le header Content-Security-Policy "
-                    "est absent."
-                )
-            }
-        )
-
-    # ========================================================
-    # STRICT TRANSPORT SECURITY
-    # ========================================================
-
-    hsts = response.headers.get(
-        "Strict-Transport-Security"
-    )
-
-    # HSTS est uniquement pertinent pour HTTPS.
     if (
-        response.url.lower().startswith("https://")
-        and not hsts
+        "Content-Security-Policy"
+        not in headers
     ):
 
         detections.append(
             {
-                "event_type": "HSTS_MISSING",
-                "url": response.url,
-                "status_code": response.status_code,
+                "event_type": (
+                    "CSP_MISSING"
+                ),
+
+                "source_type": "WEB",
+
+                "target": final_url,
+
+                "url": final_url,
+
+                "status_code": (
+                    response.status_code
+                ),
+
                 "message": (
-                    "Le header Strict-Transport-Security "
+                    "L'en-tête "
+                    "Content-Security-Policy "
                     "est absent."
-                )
+                ),
+
+                "description": (
+                    "Aucune politique CSP "
+                    "n'a été détectée dans "
+                    "les en-têtes HTTP."
+                ),
+
+                "status": "OPEN",
             }
         )
+
+
+    # ========================================================
+    # HSTS
+    # ========================================================
+
+    if (
+        final_url.lower().startswith(
+            "https://"
+        )
+        and
+        "Strict-Transport-Security"
+        not in headers
+    ):
+
+        detections.append(
+            {
+                "event_type": (
+                    "HSTS_MISSING"
+                ),
+
+                "source_type": "WEB",
+
+                "target": final_url,
+
+                "url": final_url,
+
+                "status_code": (
+                    response.status_code
+                ),
+
+                "message": (
+                    "L'en-tête "
+                    "Strict-Transport-Security "
+                    "est absent."
+                ),
+
+                "description": (
+                    "Le site utilise HTTPS "
+                    "mais ne fournit pas "
+                    "de politique HSTS."
+                ),
+
+                "status": "OPEN",
+            }
+        )
+
 
     # ========================================================
     # X-CONTENT-TYPE-OPTIONS
     # ========================================================
 
-    content_type_options = response.headers.get(
+    if (
         "X-Content-Type-Options"
-    )
-
-    if not content_type_options:
+        not in headers
+    ):
 
         detections.append(
             {
                 "event_type": (
                     "X_CONTENT_TYPE_OPTIONS_MISSING"
                 ),
-                "url": response.url,
-                "status_code": response.status_code,
+
+                "source_type": "WEB",
+
+                "target": final_url,
+
+                "url": final_url,
+
+                "status_code": (
+                    response.status_code
+                ),
+
                 "message": (
-                    "Le header X-Content-Type-Options "
+                    "L'en-tête "
+                    "X-Content-Type-Options "
                     "est absent."
-                )
+                ),
+
+                "description": (
+                    "Le navigateur peut tenter "
+                    "d'interpréter automatiquement "
+                    "le type de certains contenus."
+                ),
+
+                "status": "OPEN",
             }
         )
+
 
     # ========================================================
     # X-FRAME-OPTIONS
     # ========================================================
 
-    frame_options = response.headers.get(
+    if (
         "X-Frame-Options"
-    )
-
-    if not frame_options:
+        not in headers
+    ):
 
         detections.append(
             {
-                "event_type": "X_FRAME_OPTIONS_MISSING",
-                "url": response.url,
-                "status_code": response.status_code,
+                "event_type": (
+                    "X_FRAME_OPTIONS_MISSING"
+                ),
+
+                "source_type": "WEB",
+
+                "target": final_url,
+
+                "url": final_url,
+
+                "status_code": (
+                    response.status_code
+                ),
+
                 "message": (
-                    "Le header X-Frame-Options "
+                    "L'en-tête "
+                    "X-Frame-Options "
                     "est absent."
-                )
+                ),
+
+                "description": (
+                    "Le site ne fournit pas "
+                    "de protection explicite "
+                    "contre son affichage "
+                    "dans certaines frames."
+                ),
+
+                "status": "OPEN",
             }
         )
+
 
     # ========================================================
     # REFERRER POLICY
     # ========================================================
 
-    referrer_policy = response.headers.get(
+    if (
         "Referrer-Policy"
-    )
-
-    if not referrer_policy:
+        not in headers
+    ):
 
         detections.append(
             {
-                "event_type": "REFERRER_POLICY_MISSING",
-                "url": response.url,
-                "status_code": response.status_code,
+                "event_type": (
+                    "REFERRER_POLICY_MISSING"
+                ),
+
+                "source_type": "WEB",
+
+                "target": final_url,
+
+                "url": final_url,
+
+                "status_code": (
+                    response.status_code
+                ),
+
                 "message": (
-                    "Le header Referrer-Policy "
+                    "L'en-tête "
+                    "Referrer-Policy "
                     "est absent."
-                )
+                ),
+
+                "description": (
+                    "Aucune politique explicite "
+                    "de gestion du référent HTTP "
+                    "n'a été détectée."
+                ),
+
+                "status": "OPEN",
             }
         )
 
-    # IMPORTANT :
-    # le return doit rester tout en bas,
-    # après tous les contrôles.
+
     return detections
 
+
+# ============================================================
+# TRANSFORMATION DES DÉTECTIONS
+# ============================================================
 
 def process_web_detections(
     detections: list[dict]
 ) -> list[dict]:
     """
-    Transforme les détections Web en alertes
-    puis les enregistre dans SQLite.
-
-    Paramètres
-    ----------
-    detections : list[dict]
-        Liste des problèmes détectés pendant l'audit Web.
-
-    Retour
-    ------
-    list[dict]
-        Liste des alertes générées.
+    Transforme les détections Web
+    en alertes normalisées puis les
+    enregistre dans SQLite.
     """
 
     alerts = []
 
+
     for detection in detections:
 
-        # Transformation de la détection
-        # en alerte avec score et niveau de risque.
+        # WEB_REQUEST_ERROR n'est pas encore
+        # une règle de scoring du Risk Engine.
+        if (
+            detection.get("event_type")
+            == "WEB_REQUEST_ERROR"
+        ):
+
+            continue
+
+
         alert = build_security_alert(
             detection
         )
 
-        # Stockage dans SQLite.
-        save_alert(
+        alert_id = save_alert(
             alert
         )
+
+        alert["id"] = alert_id
 
         alerts.append(
             alert
         )
 
+
     return alerts
 
 
+# ============================================================
+# PIPELINE WEB COMPLET
+# ============================================================
+
 def run_web_analysis(
-    url: str
+    url: str,
+    timeout: int = 10
 ) -> list[dict]:
     """
-    Lance le pipeline complet d'audit Web.
+    Lance le pipeline complet d'analyse Web.
 
     Étapes :
-    - analyse de l'URL ;
-    - détection des problèmes ;
-    - génération des alertes ;
-    - calcul du score de risque ;
-    - stockage SQLite.
-
-    Paramètres
-    ----------
-    url : str
-        URL à analyser.
-
-    Retour
-    ------
-    list[dict]
-        Liste des alertes générées.
+    1. audit HTTP ;
+    2. détection des problèmes ;
+    3. scoring ;
+    4. création des alertes ;
+    5. sauvegarde SQLite.
     """
 
     detections = analyze_web_security(
-        url
+        url=url,
+        timeout=timeout
     )
 
     alerts = process_web_detections(
@@ -275,51 +444,19 @@ def run_web_analysis(
     return alerts
 
 
+# ============================================================
+# TEST MANUEL
+# ============================================================
+
 if __name__ == "__main__":
 
-    # URL utilisée pour le test manuel.
-    url = "https://example.com"
-
-    print(
-        f"\n--- Audit Web : {url} ---"
+    test_url = (
+        "https://example.com"
     )
 
-    detections = analyze_web_security(
-        url
+    results = run_web_analysis(
+        test_url
     )
 
-    if not detections:
-
-        print(
-            "Aucun problème de sécurité détecté."
-        )
-
-    else:
-
-        print(
-            f"{len(detections)} problème(s) détecté(s).\n"
-        )
-
-        for detection in detections:
-
-            print(
-                f"Type : "
-                f"{detection.get('event_type')}"
-            )
-
-            print(
-                f"URL : "
-                f"{detection.get('url')}"
-            )
-
-            print(
-                f"Code HTTP : "
-                f"{detection.get('status_code')}"
-            )
-
-            print(
-                f"Message : "
-                f"{detection.get('message')}"
-            )
-
-            print("-" * 50)
+    for result in results:
+        print(result)
