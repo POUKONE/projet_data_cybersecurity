@@ -1,25 +1,22 @@
 """
-Orchestrateur principal de l'audit Web.
+Orchestrateur principal de l'audit Web passif.
 
 Responsabilités :
 - validation de l'URL ;
 - définition du périmètre autorisé ;
-- collecte HTTP contrôlée ;
-- contrôle des redirections ;
-- exécution des contrôles passifs ;
+- crawl passif multi-pages ;
+- analyse TLS ;
+- analyse des headers ;
+- analyse des cookies ;
+- analyse CORS ;
+- recherche de divulgation d'informations ;
+- analyse des formulaires ;
 - agrégation des résultats ;
-- calcul de la couverture ;
-- transformation des findings en alertes ;
+- génération d'alertes ;
 - persistance des alertes.
 
-Cette version exécute uniquement des contrôles passifs.
-Les vérifications actives seront ajoutées séparément.
+Aucun test actif n'est exécuté ici.
 """
-
-from app.scoring.rules import (
-    get_rule,
-)
-
 
 from app.analyzers.web_checks.cookies import (
     check_cookie_security,
@@ -41,6 +38,7 @@ from app.analyzers.web_checks.tls import (
 )
 from app.collectors.web_collector import (
     WebCollectionError,
+    crawl_site,
     request_with_scope,
     validate_url,
 )
@@ -50,13 +48,16 @@ from app.database.db import (
 from app.scoring.risk_engine import (
     build_security_alert,
 )
+from app.scoring.rules import (
+    get_rule,
+)
 from app.security.web_scope import (
     build_allowed_domains,
 )
 
 
 # ============================================================
-# RAPPORT
+# RAPPORT VIDE
 # ============================================================
 
 
@@ -64,63 +65,77 @@ def create_empty_report(
     url: str,
 ) -> dict:
     """
-    Crée la structure standard d'un rapport d'audit Web.
+    Crée la structure standard du rapport Web.
     """
 
     return {
         "audit_status": "PENDING",
         "mode": "PASSIVE",
+
         "requested_url": url,
         "final_url": None,
+
         "http_status": None,
         "request_count": 0,
+
         "redirects": [],
+
         "pages": [],
         "forms": [],
+
         "checks": [],
         "findings": [],
 
-        # Compatibilité temporaire avec les anciennes
-        # parties du projet utilisant encore "detections".
+        # Compatibilité avec les anciennes parties
+        # du projet.
         "detections": [],
 
         "alerts": [],
         "errors": [],
 
+        "skipped_urls": [],
+
+        "crawl": {
+            "enabled": True,
+            "visited_count": 0,
+            "discovered_count": 0,
+            "duration_seconds": 0,
+            "max_depth": 0,
+            "max_pages": 0,
+        },
+
         "limitations": [
             (
-                "Une seule page est analysée dans cette "
-                "version de l'audit."
+                "Le JavaScript n'est pas exécuté."
             ),
             (
-                "Le JavaScript côté client n'est pas exécuté."
+                "Les pages nécessitant une authentification "
+                "ne sont pas automatiquement explorées."
             ),
             (
-                "Les zones nécessitant une authentification "
-                "ne sont pas analysées automatiquement."
+                "Les contrôles d'accès nécessitent "
+                "une validation manuelle ou un contexte authentifié."
             ),
             (
-                "Les contrôles d'accès ne sont pas "
-                "automatiquement validés."
+                "Les protections CSRF ne sont pas encore "
+                "analysées automatiquement."
             ),
             (
-                "La présence d'une protection CSRF n'est pas "
-                "encore analysée automatiquement."
+                "Les vulnérabilités XSS stockées ne sont "
+                "pas testées."
             ),
             (
-                "Les XSS stockées ne sont pas recherchées."
+                "La logique métier nécessite "
+                "une validation manuelle."
             ),
             (
-                "Les vulnérabilités de logique métier "
-                "nécessitent une validation manuelle."
-            ),
-            (
-                "Aucun contrôle actif SQLi, XSS réfléchie "
-                "ou redirection ouverte n'est exécuté."
+                "Aucun test actif SQLi, XSS réfléchi "
+                "ou open redirect n'est exécuté."
             ),
         ],
 
         "coverage": {
+            "total": 0,
             "executed": 0,
             "passed": 0,
             "failed": 0,
@@ -147,53 +162,63 @@ def update_coverage(
     report: dict,
 ) -> None:
     """
-    Recalcule les statistiques de couverture.
+    Recalcule les statistiques de couverture
+    à partir des contrôles exécutés.
     """
 
-    checks = report.get(
+    coverage = {
+        "total": 0,
+        "executed": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0,
+        "indeterminate": 0,
+    }
+
+
+    for check in report.get(
         "checks",
         [],
-    )
+    ):
 
-    report["coverage"] = {
-        "executed": sum(
-            1
-            for check in checks
-            if check.get("status")
-            in {
-                "PASSED",
-                "FAILED",
-            }
-        ),
+        coverage["total"] += 1
 
-        "passed": sum(
-            1
-            for check in checks
-            if check.get("status")
-            == "PASSED"
-        ),
+        status = str(
+            check.get(
+                "status",
+                "",
+            )
+        ).upper()
 
-        "failed": sum(
-            1
-            for check in checks
-            if check.get("status")
-            == "FAILED"
-        ),
 
-        "skipped": sum(
-            1
-            for check in checks
-            if check.get("status")
-            == "SKIPPED"
-        ),
+        if status == "PASSED":
 
-        "indeterminate": sum(
-            1
-            for check in checks
-            if check.get("status")
-            == "INDETERMINATE"
-        ),
-    }
+            coverage["executed"] += 1
+            coverage["passed"] += 1
+
+
+        elif status == "FAILED":
+
+            coverage["executed"] += 1
+            coverage["failed"] += 1
+
+
+        elif status == "SKIPPED":
+
+            coverage["skipped"] += 1
+
+
+        elif status == "INDETERMINATE":
+
+            coverage["indeterminate"] += 1
+
+
+        else:
+
+            coverage["indeterminate"] += 1
+
+
+    report["coverage"] = coverage
 
 
 # ============================================================
@@ -202,377 +227,205 @@ def update_coverage(
 
 
 def get_collection_error_type(
-    message: str,
+    error_message: str,
 ) -> str:
     """
-    Transforme une erreur du collecteur en type exploitable.
+    Détermine le type d'erreur de collecte.
     """
 
-    upper_message = (
-        message.upper()
+    message = (
+        str(
+            error_message
+        ).upper()
     )
 
-    known_errors = [
-        "TLS_ERROR",
-        "CONNECTION_TIMEOUT",
-        "READ_TIMEOUT",
-        "CONNECTION_ERROR",
-        "REQUEST_ERROR",
-    ]
 
-    for error_type in known_errors:
+    if "TLS_ERROR" in message:
 
-        if error_type in upper_message:
+        return "TLS_ERROR"
 
-            return error_type
 
-    if (
-        "REDIRECTION"
-        in upper_message
-        and (
-            "PÉRIMÈTRE"
-            in upper_message
-            or "PERIMETRE"
-            in upper_message
-        )
-    ):
-        return "OUT_OF_SCOPE_REDIRECT"
+    if "READ_TIMEOUT" in message:
 
-    if (
-        "HORS PÉRIMÈTRE"
-        in upper_message
-        or "HORS PERIMETRE"
-        in upper_message
-    ):
+        return "READ_TIMEOUT"
+
+
+    if "CONNECTION_TIMEOUT" in message:
+
+        return "CONNECTION_TIMEOUT"
+
+
+    if "CONNECTION_ERROR" in message:
+
+        return "CONNECTION_ERROR"
+
+
+    if "INVALID_URL" in message:
+
+        return "INVALID_URL"
+
+
+    if "HORS PÉRIMÈTRE" in message:
+
         return "OUT_OF_SCOPE"
 
-    if (
-        "REDIRECTIONS"
-        in upper_message
-        and "MAXIMAL"
-        in upper_message
-    ):
-        return "TOO_MANY_REDIRECTS"
 
-    return "COLLECTION_ERROR"
+    return "WEB_REQUEST_ERROR"
 
 
 # ============================================================
-# AGRÉGATION
+# AJOUT D'UN RESULTAT DE CHECK
 # ============================================================
 
 
 def merge_check_result(
     report: dict,
     result: dict,
+    page_url: str | None = None,
 ) -> None:
     """
-    Fusionne le résultat d'un module de contrôle
-    dans le rapport principal.
+    Fusionne checks et findings dans le rapport.
+
+    page_url permet de conserver la page d'origine.
     """
 
-    if not isinstance(
-        result,
-        dict,
-    ):
-        return
-
-    checks = result.get(
+    for check in result.get(
         "checks",
         [],
-    )
+    ):
 
-    findings = result.get(
+        check_copy = dict(
+            check
+        )
+
+        if page_url:
+
+            check_copy.setdefault(
+                "url",
+                page_url,
+            )
+
+        report["checks"].append(
+            check_copy
+        )
+
+
+    for finding in result.get(
         "findings",
         [],
-    )
+    ):
 
-    if checks:
-
-        report[
-            "checks"
-        ].extend(
-            checks
+        finding_copy = dict(
+            finding
         )
 
-    if findings:
+        if page_url:
 
-        report[
-            "findings"
-        ].extend(
-            findings
+            finding_copy.setdefault(
+                "url",
+                page_url,
+            )
+
+            finding_copy.setdefault(
+                "target",
+                page_url,
+            )
+
+        report["findings"].append(
+            finding_copy
         )
 
 
 # ============================================================
-# ANALYSE PASSIVE
+# ANALYSE D'UNE PAGE
 # ============================================================
 
 
-def analyze_web_security(
-    url: str,
-    timeout: int = 10,
-    allowed_domains: list[str] | None = None,
-) -> dict:
+def analyze_page(
+    report: dict,
+    response,
+    requested_url: str,
+    final_url: str,
+) -> None:
     """
-    Exécute l'audit passif d'une page Web.
-
-    Aucun payload d'injection n'est envoyé.
+    Exécute tous les contrôles passifs
+    applicables à une page.
     """
 
-    report = create_empty_report(
-        url
+    # --------------------------------------------------------
+    # TLS / HTTPS
+    # --------------------------------------------------------
+
+    merge_check_result(
+        report,
+        check_tls_usage(
+            requested_url=requested_url,
+            final_url=final_url,
+            response=response,
+        ),
+        page_url=final_url,
     )
 
 
-    # ========================================================
-    # VALIDATION DE L'URL
-    # ========================================================
+    # --------------------------------------------------------
+    # HEADERS
+    # --------------------------------------------------------
 
-    valid, validation_error = (
-        validate_url(
-            url
-        )
-    )
-
-    if not valid:
-
-        report[
-            "audit_status"
-        ] = "FAILED"
-
-        report[
-            "errors"
-        ].append(
-            {
-                "type": "INVALID_URL",
-                "message": (
-                    validation_error
-                    or "URL invalide."
-                ),
-            }
-        )
-
-        report[
-            "checks"
-        ].append(
-            {
-                "check_id": "URL_VALIDATION",
-                "name": "Validation de l'URL",
-                "status": "FAILED",
-                "message": (
-                    validation_error
-                    or "URL invalide."
-                ),
-            }
-        )
-
-        update_coverage(
-            report
-        )
-
-        return report
-
-
-    url = url.strip()
-
-
-    report[
-        "checks"
-    ].append(
-        {
-            "check_id": "URL_VALIDATION",
-            "name": "Validation de l'URL",
-            "status": "PASSED",
-            "message": "URL valide.",
-        }
+    merge_check_result(
+        report,
+        check_security_headers(
+            response=response,
+            target_url=final_url,
+        ),
+        page_url=final_url,
     )
 
 
-    # ========================================================
-    # PÉRIMÈTRE AUTORISÉ
-    # ========================================================
+    # --------------------------------------------------------
+    # COOKIES
+    # --------------------------------------------------------
 
-    scope = (
-        build_allowed_domains(
-            start_url=url,
-            extra_domains=allowed_domains,
-        )
-    )
-
-    report[
-        "metadata"
-    ][
-        "allowed_domains"
-    ] = sorted(
-        scope
+    merge_check_result(
+        report,
+        check_cookie_security(
+            response=response,
+            target_url=final_url,
+        ),
+        page_url=final_url,
     )
 
 
-    if not scope:
+    # --------------------------------------------------------
+    # CORS
+    # --------------------------------------------------------
 
-        report[
-            "audit_status"
-        ] = "FAILED"
-
-        report[
-            "errors"
-        ].append(
-            {
-                "type": "INVALID_SCOPE",
-                "message": (
-                    "Aucun domaine autorisé "
-                    "n'a pu être déterminé."
-                ),
-            }
-        )
-
-        report[
-            "checks"
-        ].append(
-            {
-                "check_id": "WEB_SCOPE",
-                "name": "Périmètre de l'audit",
-                "status": "FAILED",
-                "message": (
-                    "Le périmètre autorisé "
-                    "est vide."
-                ),
-            }
-        )
-
-        update_coverage(
-            report
-        )
-
-        return report
-
-
-    report[
-        "checks"
-    ].append(
-        {
-            "check_id": "WEB_SCOPE",
-            "name": "Périmètre de l'audit",
-            "status": "PASSED",
-            "message": (
-                "Le périmètre de l'audit "
-                "a été défini."
-            ),
-        }
+    merge_check_result(
+        report,
+        check_cors(
+            response=response,
+            target_url=final_url,
+        ),
+        page_url=final_url,
     )
 
 
-    # ========================================================
-    # COLLECTE HTTP
-    # ========================================================
+    # --------------------------------------------------------
+    # DIVULGATION D'INFORMATIONS
+    # --------------------------------------------------------
 
-    try:
-
-        collection = (
-            request_with_scope(
-                url=url,
-                allowed_domains=scope,
-                timeout=timeout,
-            )
-        )
-
-    except WebCollectionError as error:
-
-        error_message = str(
-            error
-        )
-
-        error_type = (
-            get_collection_error_type(
-                error_message
-            )
-        )
-
-        report[
-            "audit_status"
-        ] = "FAILED"
-
-        report[
-            "errors"
-        ].append(
-            {
-                "type": error_type,
-                "message": error_message,
-            }
-        )
-
-        report[
-            "checks"
-        ].append(
-            {
-                "check_id": "HTTP_COLLECTION",
-                "name": "Collecte HTTP",
-                "status": "INDETERMINATE",
-                "message": (
-                    "La collecte HTTP n'a "
-                    "pas pu être terminée."
-                ),
-            }
-        )
-
-        update_coverage(
-            report
-        )
-
-        return report
-
-
-    response = collection[
-        "response"
-    ]
-
-    final_url = collection[
-        "final_url"
-    ]
-
-
-    report[
-        "final_url"
-    ] = final_url
-
-    report[
-        "http_status"
-    ] = response.status_code
-
-    report[
-        "request_count"
-    ] = collection.get(
-        "request_count",
-        0,
-    )
-
-    report[
-        "redirects"
-    ] = collection.get(
-        "redirects",
-        [],
+    merge_check_result(
+        report,
+        check_information_disclosure(
+            response=response,
+            target_url=final_url,
+        ),
+        page_url=final_url,
     )
 
 
-    report[
-        "checks"
-    ].append(
-        {
-            "check_id": "HTTP_COLLECTION",
-            "name": "Collecte HTTP",
-            "status": "PASSED",
-            "message": (
-                "La réponse HTTP "
-                "a été collectée."
-            ),
-        }
-    )
-
-
-    # ========================================================
-    # INVENTAIRE DE LA PAGE
-    # ========================================================
+    # --------------------------------------------------------
+    # FORMULAIRES
+    # --------------------------------------------------------
 
     content_type = (
         response.headers.get(
@@ -582,120 +435,10 @@ def analyze_web_security(
     )
 
 
-    report[
-        "pages"
-    ].append(
-        {
-            "url": final_url,
-            "status_code": (
-                response.status_code
-            ),
-            "content_type": (
-                content_type
-            ),
-        }
-    )
-
-
-    # ========================================================
-    # TLS / HTTPS
-    # ========================================================
-
-    tls_result = (
-        check_tls_usage(
-            requested_url=url,
-            final_url=final_url,
-            response=response,
-        )
-    )
-
-    merge_check_result(
-        report,
-        tls_result,
-    )
-
-
-    # ========================================================
-    # HEADERS HTTP
-    # ========================================================
-
-    headers_result = (
-        check_security_headers(
-            response=response,
-            target_url=final_url,
-        )
-    )
-
-    merge_check_result(
-        report,
-        headers_result,
-    )
-
-
-    # ========================================================
-    # COOKIES
-    # ========================================================
-
-    cookies_result = (
-        check_cookie_security(
-            response=response,
-            target_url=final_url,
-        )
-    )
-
-    merge_check_result(
-        report,
-        cookies_result,
-    )
-
-
-    # ========================================================
-    # CORS
-    # ========================================================
-
-    cors_result = (
-        check_cors(
-            response=response,
-            target_url=final_url,
-        )
-    )
-
-    merge_check_result(
-        report,
-        cors_result,
-    )
-
-
-    # ========================================================
-    # DIVULGATION D'INFORMATIONS
-    # ========================================================
-
-    disclosure_result = (
-        check_information_disclosure(
-            response=response,
-            target_url=final_url,
-        )
-    )
-
-    merge_check_result(
-        report,
-        disclosure_result,
-    )
-
-
-    # ========================================================
-    # FORMULAIRES
-    # ========================================================
-
-    content_type_lower = (
-        content_type.lower()
-    )
-
-
     if (
-        "text/html"
-        in content_type_lower
-        or not content_type
+        not content_type
+        or "text/html"
+        in content_type.lower()
     ):
 
         forms_result = (
@@ -705,58 +448,642 @@ def analyze_web_security(
             )
         )
 
-        merge_check_result(
-            report,
-            forms_result,
-        )
 
-        report[
-            "forms"
-        ] = forms_result.get(
+        forms = forms_result.get(
             "forms",
             [],
         )
 
+
+        for form in forms:
+
+            form_copy = dict(
+                form
+            )
+
+            form_copy.setdefault(
+                "page_url",
+                final_url,
+            )
+
+            report["forms"].append(
+                form_copy
+            )
+
+
+        merge_check_result(
+            report,
+            forms_result,
+            page_url=final_url,
+        )
+
+
     else:
 
-        report[
-            "checks"
-        ].append(
+        report["checks"].append(
             {
-                "check_id": "FORMS_PRESENT",
-                "name": "Analyse des formulaires",
+                "check_id": (
+                    "FORM_ANALYSIS"
+                ),
+
+                "name": (
+                    "Analyse des formulaires"
+                ),
+
                 "status": "SKIPPED",
+
                 "message": (
-                    "Le contenu reçu "
-                    "n'est pas HTML."
+                    "La réponse n'est pas "
+                    "de type HTML."
+                ),
+
+                "url": final_url,
+            }
+        )
+
+
+# ============================================================
+# ANALYSE PRINCIPALE
+# ============================================================
+
+
+def analyze_web_security(
+    url: str,
+    timeout: int = 10,
+    allowed_domains: list[str] | None = None,
+    max_depth: int = 2,
+    max_pages: int = 20,
+    max_duration_seconds: int = 30,
+    delay_seconds: float = 0.2,
+) -> dict:
+    """
+    Exécute un audit Web passif multi-pages.
+    """
+
+    report = create_empty_report(
+        url
+    )
+
+
+    # ========================================================
+    # VALIDATION URL
+    # ========================================================
+
+    valid, validation_error = (
+        validate_url(
+            url
+        )
+    )
+
+
+    if not valid:
+
+        report["audit_status"] = "FAILED"
+
+        report["errors"].append(
+            {
+                "type": "INVALID_URL",
+                "message": validation_error,
+                "url": url,
+            }
+        )
+
+        report["checks"].append(
+            {
+                "check_id": (
+                    "URL_VALIDATION"
+                ),
+
+                "name": (
+                    "Validation de l'URL"
+                ),
+
+                "status": (
+                    "INDETERMINATE"
+                ),
+
+                "message": (
+                    validation_error
+                ),
+
+                "url": url,
+            }
+        )
+
+        update_coverage(
+            report
+        )
+
+        return report
+
+
+    report["checks"].append(
+        {
+            "check_id": (
+                "URL_VALIDATION"
+            ),
+
+            "name": (
+                "Validation de l'URL"
+            ),
+
+            "status": "PASSED",
+
+            "message": (
+                "URL valide."
+            ),
+
+            "url": url,
+        }
+    )
+
+
+    # ========================================================
+    # SCOPE
+    # ========================================================
+
+    scope = build_allowed_domains(
+        url,
+        allowed_domains,
+    )
+
+
+    if not scope:
+
+        report["audit_status"] = "FAILED"
+
+        report["errors"].append(
+            {
+                "type": "INVALID_SCOPE",
+                "message": (
+                    "Aucun domaine autorisé "
+                    "n'a pu être déterminé."
+                ),
+                "url": url,
+            }
+        )
+
+        report["checks"].append(
+            {
+                "check_id": (
+                    "WEB_SCOPE"
+                ),
+
+                "name": (
+                    "Périmètre de l'audit"
+                ),
+
+                "status": (
+                    "INDETERMINATE"
+                ),
+
+                "message": (
+                    "Périmètre invalide."
+                ),
+
+                "url": url,
+            }
+        )
+
+        update_coverage(
+            report
+        )
+
+        return report
+
+
+    report["metadata"][
+        "allowed_domains"
+    ] = sorted(
+        scope
+    )
+
+
+    report["checks"].append(
+        {
+            "check_id": (
+                "WEB_SCOPE"
+            ),
+
+            "name": (
+                "Périmètre de l'audit"
+            ),
+
+            "status": "PASSED",
+
+            "message": (
+                "Périmètre défini."
+            ),
+
+            "url": url,
+        }
+    )
+
+
+    # ========================================================
+    # CRAWL
+    # ========================================================
+
+    try:
+
+        crawl_result = crawl_site(
+            start_url=url,
+            allowed_domains=scope,
+            max_depth=max_depth,
+            max_pages=max_pages,
+            max_duration_seconds=(
+                max_duration_seconds
+            ),
+            delay_seconds=delay_seconds,
+            timeout=timeout,
+        )
+
+
+    except WebCollectionError as error:
+
+        error_type = (
+            get_collection_error_type(
+                str(
+                    error
+                )
+            )
+        )
+
+
+        report["audit_status"] = "FAILED"
+
+        report["errors"].append(
+            {
+                "type": error_type,
+                "message": str(
+                    error
+                ),
+                "url": url,
+            }
+        )
+
+        report["checks"].append(
+            {
+                "check_id": (
+                    "HTTP_COLLECTION"
+                ),
+
+                "name": (
+                    "Collecte HTTP"
+                ),
+
+                "status": (
+                    "INDETERMINATE"
+                ),
+
+                "message": str(
+                    error
+                ),
+
+                "url": url,
+            }
+        )
+
+        update_coverage(
+            report
+        )
+
+        return report
+
+
+    report["crawl"] = {
+        "enabled": True,
+
+        "visited_count": (
+            crawl_result.get(
+                "visited_count",
+                0,
+            )
+        ),
+
+        "discovered_count": (
+            crawl_result.get(
+                "discovered_count",
+                0,
+            )
+        ),
+
+        "duration_seconds": (
+            crawl_result.get(
+                "duration_seconds",
+                0,
+            )
+        ),
+
+        "max_depth": max_depth,
+
+        "max_pages": max_pages,
+    }
+
+
+    report["request_count"] = (
+        crawl_result.get(
+            "request_count",
+            0,
+        )
+    )
+
+
+    report["skipped_urls"] = (
+        crawl_result.get(
+            "skipped",
+            [],
+        )
+    )
+
+
+    # ========================================================
+    # ERREURS PARTIELLES DE CRAWL
+    # ========================================================
+
+    for crawl_error in (
+        crawl_result.get(
+            "errors",
+            [],
+        )
+    ):
+
+        report["errors"].append(
+            {
+                "type": (
+                    get_collection_error_type(
+                        crawl_error.get(
+                            "message",
+                            "",
+                        )
+                    )
+                ),
+
+                "message": (
+                    crawl_error.get(
+                        "message",
+                        "",
+                    )
+                ),
+
+                "url": (
+                    crawl_error.get(
+                        "url"
+                    )
                 ),
             }
         )
 
 
     # ========================================================
-    # COMPATIBILITÉ TEMPORAIRE
+    # PAGES
     # ========================================================
 
-    report[
-        "detections"
-    ] = list(
-        report[
-            "findings"
-        ]
+    crawl_pages = (
+        crawl_result.get(
+            "pages",
+            [],
+        )
+    )
+
+
+    if not crawl_pages:
+
+        report["audit_status"] = "FAILED"
+
+        report["checks"].append(
+            {
+                "check_id": (
+                    "HTTP_COLLECTION"
+                ),
+
+                "name": (
+                    "Collecte HTTP"
+                ),
+
+                "status": (
+                    "INDETERMINATE"
+                ),
+
+                "message": (
+                    "Aucune page n'a pu "
+                    "être collectée."
+                ),
+
+                "url": url,
+            }
+        )
+
+        update_coverage(
+            report
+        )
+
+        return report
+
+
+    report["checks"].append(
+        {
+            "check_id": (
+                "HTTP_COLLECTION"
+            ),
+
+            "name": (
+                "Collecte HTTP"
+            ),
+
+            "status": "PASSED",
+
+            "message": (
+                f"{len(crawl_pages)} "
+                "page(s) collectée(s)."
+            ),
+
+            "url": url,
+        }
     )
 
 
     # ========================================================
-    # STATISTIQUES
+    # ANALYSE PAGE PAR PAGE
     # ========================================================
 
-    report[
-        "finding_count"
-    ] = len(
-        report[
-            "findings"
-        ]
+    for index, page in enumerate(
+        crawl_pages
+    ):
+
+        page_url = (
+            page.get(
+                "url"
+            )
+        )
+
+        final_url = (
+            page.get(
+                "final_url"
+            )
+            or page_url
+        )
+
+
+        # ----------------------------------------------------
+        # INVENTAIRE
+        # ----------------------------------------------------
+
+        report["pages"].append(
+            {
+                "url": page_url,
+                "final_url": final_url,
+                "depth": (
+                    page.get(
+                        "depth"
+                    )
+                ),
+                "status_code": (
+                    page.get(
+                        "status_code"
+                    )
+                ),
+                "content_type": (
+                    page.get(
+                        "content_type"
+                    )
+                ),
+            }
+        )
+
+
+        # ----------------------------------------------------
+        # PREMIÈRE PAGE
+        # ----------------------------------------------------
+
+        if index == 0:
+
+            report["final_url"] = (
+                final_url
+            )
+
+            report["http_status"] = (
+                page.get(
+                    "status_code"
+                )
+            )
+
+            report["redirects"] = (
+                page.get(
+                    "redirects",
+                    [],
+                )
+            )
+
+
+        # ----------------------------------------------------
+        # RÉCUPÉRER LA RÉPONSE POUR LES CHECKS
+        # ----------------------------------------------------
+        #
+        # crawl_site() stocke volontairement uniquement
+        # les métadonnées de chaque page.
+        # On effectue ici une seconde collecte contrôlée
+        # pour récupérer le body/headers nécessaires
+        # aux analyseurs.
+        #
+        # Cette architecture sera optimisée ensuite
+        # pour éviter les doubles requêtes.
+        # ----------------------------------------------------
+
+        try:
+
+            collection = (
+                request_with_scope(
+                    url=page_url,
+                    allowed_domains=scope,
+                    timeout=timeout,
+                )
+            )
+
+
+            response = (
+                collection[
+                    "response"
+                ]
+            )
+
+
+            report["request_count"] += (
+                collection.get(
+                    "request_count",
+                    0,
+                )
+            )
+
+
+            analyze_page(
+                report=report,
+                response=response,
+                requested_url=page_url,
+                final_url=(
+                    collection.get(
+                        "final_url",
+                        final_url,
+                    )
+                ),
+            )
+
+
+        except WebCollectionError as error:
+
+            report["errors"].append(
+                {
+                    "type": (
+                        get_collection_error_type(
+                            str(
+                                error
+                            )
+                        )
+                    ),
+
+                    "message": str(
+                        error
+                    ),
+
+                    "url": page_url,
+                }
+            )
+
+
+            report["checks"].append(
+                {
+                    "check_id": (
+                        "PAGE_ANALYSIS"
+                    ),
+
+                    "name": (
+                        "Analyse de la page"
+                    ),
+
+                    "status": (
+                        "INDETERMINATE"
+                    ),
+
+                    "message": str(
+                        error
+                    ),
+
+                    "url": page_url,
+                }
+            )
+
+
+    # ========================================================
+    # FINALISATION
+    # ========================================================
+
+    report["detections"] = list(
+        report["findings"]
+    )
+
+
+    report["finding_count"] = len(
+        report["findings"]
     )
 
 
@@ -765,26 +1092,24 @@ def analyze_web_security(
     )
 
 
-    if report[
-        "errors"
-    ]:
+    if report["errors"]:
 
-        report[
-            "audit_status"
-        ] = "PARTIAL"
+        report["audit_status"] = (
+            "PARTIAL"
+        )
 
     else:
 
-        report[
-            "audit_status"
-        ] = "COMPLETED"
+        report["audit_status"] = (
+            "COMPLETED"
+        )
 
 
     return report
 
 
 # ============================================================
-# PERSISTANCE DES FINDINGS
+# TRANSFORMATION FINDINGS -> ALERTES
 # ============================================================
 
 
@@ -792,11 +1117,8 @@ def process_web_detections(
     detections: list[dict],
 ) -> list[dict]:
     """
-    Transforme les findings compatibles avec
-    le moteur de scoring en alertes persistantes.
-
-    Un finding sans règle de scoring ne doit jamais
-    faire échouer l'intégralité de l'audit.
+    Transforme les findings disposant d'une règle
+    de scoring en alertes persistantes.
     """
 
     alerts = []
@@ -807,33 +1129,37 @@ def process_web_detections(
         event_type = detection.get(
             "event_type"
         )
+
+
         if get_rule(
             event_type
         ) is None:
+
             continue
+
 
         try:
-            alert = build_security_alert(
-                detection
+
+            alert = (
+                build_security_alert(
+                    detection
+                )
             )
+
         except ValueError:
+
             continue
 
 
-        alert_id = (
-            save_alert(
-                alert
-            )
+        alert_id = save_alert(
+            alert
         )
 
-        alert[
-            "id"
-        ] = alert_id
 
+        alert["id"] = (
+            alert_id
+        )
 
-        # ----------------------------------------------------
-        # Métadonnées propres au rapport Web
-        # ----------------------------------------------------
 
         alert[
             "classification"
@@ -841,11 +1167,13 @@ def process_web_detections(
             "classification"
         )
 
+
         alert[
             "severity"
         ] = detection.get(
             "severity"
         )
+
 
         alert[
             "confidence"
@@ -853,11 +1181,13 @@ def process_web_detections(
             "confidence"
         )
 
+
         alert[
             "parameter"
         ] = detection.get(
             "parameter"
         )
+
 
         alert[
             "evidence"
@@ -865,11 +1195,13 @@ def process_web_detections(
             "evidence"
         )
 
+
         alert[
             "recommendation"
         ] = detection.get(
             "recommendation"
         )
+
 
         alert[
             "validation_method"
@@ -887,7 +1219,7 @@ def process_web_detections(
 
 
 # ============================================================
-# PIPELINE COMPLET
+# PIPELINE PUBLIC
 # ============================================================
 
 
@@ -895,27 +1227,26 @@ def run_web_analysis(
     url: str,
     timeout: int = 10,
     allowed_domains: list[str] | None = None,
+    max_depth: int = 2,
+    max_pages: int = 20,
+    max_duration_seconds: int = 30,
+    delay_seconds: float = 0.2,
 ) -> dict:
     """
-    Lance l'audit Web passif complet.
-
-    Le résultat contient :
-    - état de l'audit ;
-    - couverture ;
-    - pages ;
-    - formulaires ;
-    - findings ;
-    - alertes ;
-    - erreurs ;
-    - limitations.
+    Exécute l'audit Web complet passif
+    puis génère les alertes.
     """
 
-    report = (
-        analyze_web_security(
-            url=url,
-            timeout=timeout,
-            allowed_domains=allowed_domains,
-        )
+    report = analyze_web_security(
+        url=url,
+        timeout=timeout,
+        allowed_domains=allowed_domains,
+        max_depth=max_depth,
+        max_pages=max_pages,
+        max_duration_seconds=(
+            max_duration_seconds
+        ),
+        delay_seconds=delay_seconds,
     )
 
 
@@ -925,26 +1256,18 @@ def run_web_analysis(
     )
 
 
-    alerts = (
-        process_web_detections(
-            findings
-        )
-    )
-
-
-    report[
-        "alerts"
-    ] = alerts
-
-    report[
-        "finding_count"
-    ] = len(
+    alerts = process_web_detections(
         findings
     )
 
-    report[
-        "alert_count"
-    ] = len(
+
+    report["alerts"] = alerts
+
+    report["finding_count"] = len(
+        findings
+    )
+
+    report["alert_count"] = len(
         alerts
     )
 

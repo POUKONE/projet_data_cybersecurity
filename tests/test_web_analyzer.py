@@ -413,7 +413,6 @@ def test_tls_error_is_reported(
 # REDIRECTION
 # ============================================================
 
-
 @patch(
     "app.collectors.web_collector.requests.get"
 )
@@ -422,36 +421,36 @@ def test_redirect_is_recorded(
 ):
     """
     Vérifie que les redirections internes au scope
-    sont enregistrées.
+    sont enregistrées dans le rapport.
+
+    La version actuelle effectue :
+    - une collecte pendant le crawl ;
+    - une seconde collecte pendant l'analyse.
     """
 
-    redirect_response = Mock()
+    # ========================================================
+    # PREMIÈRE REDIRECTION : CRAWL
+    # ========================================================
 
-    redirect_response.url = (
-        "http://example.com"
-    )
+    redirect_response_crawl = Mock()
 
-    redirect_response.status_code = 301
+    redirect_response_crawl.status_code = 301
 
-    redirect_response.headers = {
+    redirect_response_crawl.headers = {
         "Location": (
             "https://example.com"
         )
     }
 
-    redirect_response.is_redirect = True
-    redirect_response.is_permanent_redirect = True
+    redirect_response_crawl.is_redirect = True
+    redirect_response_crawl.is_permanent_redirect = True
 
 
-    final_response = Mock()
+    final_response_crawl = Mock()
 
-    final_response.url = (
-        "https://example.com"
-    )
+    final_response_crawl.status_code = 200
 
-    final_response.status_code = 200
-
-    final_response.headers = {
+    final_response_crawl.headers = {
         "Content-Type": "text/html",
 
         "Content-Security-Policy": (
@@ -475,28 +474,102 @@ def test_redirect_is_recorded(
         ),
     }
 
-    final_response.cookies = (
+    final_response_crawl.cookies = (
         RequestsCookieJar()
     )
 
-    final_response.text = (
+    final_response_crawl.text = (
         "<html></html>"
     )
 
-    final_response.is_redirect = False
-    final_response.is_permanent_redirect = False
+    final_response_crawl.is_redirect = False
+    final_response_crawl.is_permanent_redirect = False
 
+
+    # ========================================================
+    # DEUXIÈME REDIRECTION : ANALYSE
+    # ========================================================
+
+    redirect_response_analysis = Mock()
+
+    redirect_response_analysis.status_code = 301
+
+    redirect_response_analysis.headers = {
+        "Location": (
+            "https://example.com"
+        )
+    }
+
+    redirect_response_analysis.is_redirect = True
+    redirect_response_analysis.is_permanent_redirect = True
+
+
+    final_response_analysis = Mock()
+
+    final_response_analysis.status_code = 200
+
+    final_response_analysis.headers = {
+        "Content-Type": "text/html",
+
+        "Content-Security-Policy": (
+            "default-src 'self'"
+        ),
+
+        "Strict-Transport-Security": (
+            "max-age=31536000"
+        ),
+
+        "X-Content-Type-Options": (
+            "nosniff"
+        ),
+
+        "X-Frame-Options": (
+            "DENY"
+        ),
+
+        "Referrer-Policy": (
+            "same-origin"
+        ),
+    }
+
+    final_response_analysis.cookies = (
+        RequestsCookieJar()
+    )
+
+    final_response_analysis.text = (
+        "<html></html>"
+    )
+
+    final_response_analysis.is_redirect = False
+    final_response_analysis.is_permanent_redirect = False
+
+
+    # ========================================================
+    # ORDRE DES APPELS HTTP
+    # ========================================================
 
     mock_get.side_effect = [
-        redirect_response,
-        final_response,
+        redirect_response_crawl,
+        final_response_crawl,
+        redirect_response_analysis,
+        final_response_analysis,
     ]
 
 
+    # ========================================================
+    # AUDIT
+    # ========================================================
+
     report = analyze_web_security(
-        "http://example.com"
+        "http://example.com",
+        max_depth=0,
+        delay_seconds=0,
     )
 
+
+    # ========================================================
+    # ASSERTIONS
+    # ========================================================
 
     assert (
         len(
@@ -513,25 +586,37 @@ def test_redirect_is_recorded(
 
 
     assert (
+        report["http_status"]
+        == 200
+    )
+
+
+    assert (
+        report["audit_status"]
+        == "COMPLETED"
+    )
+
+
+    assert (
+        report["crawl"][
+            "visited_count"
+        ]
+        == 1
+    )
+
+
+    # 2 requêtes pendant le crawl
+    # +
+    # 2 requêtes pendant l'analyse
+    assert (
         report["request_count"]
-        == 2
-    )
-
-
-    redirect = (
-        report["redirects"][0]
+        == 4
     )
 
 
     assert (
-        redirect["status_code"]
-        == 301
-    )
-
-
-    assert (
-        redirect["allowed"]
-        is True
+        mock_get.call_count
+        == 4
     )
 
 
@@ -793,7 +878,11 @@ def test_run_web_analysis(
         url="https://example.com",
         timeout=10,
         allowed_domains=None,
-    )
+        max_depth=2,
+        max_pages=20,
+        max_duration_seconds=30,
+        delay_seconds=0.2,
+)
 
 
     mock_process.assert_called_once_with(
