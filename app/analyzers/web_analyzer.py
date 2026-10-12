@@ -1,152 +1,124 @@
 """
-Analyse de sécurité Web.
+Orchestrateur principal de l'audit Web.
 
-Étape 2 de la refonte :
-- collecte fiable ;
-- distinction entre résultats et erreurs ;
-- suivi des contrôles exécutés ;
-- statut global de l'audit ;
-- aucune erreur réseau ne doit être interprétée
-  comme une absence de vulnérabilité.
+Responsabilités :
+- validation de l'URL ;
+- définition du périmètre autorisé ;
+- collecte HTTP contrôlée ;
+- contrôle des redirections ;
+- exécution des contrôles passifs ;
+- agrégation des résultats ;
+- calcul de la couverture ;
+- transformation des findings en alertes ;
+- persistance des alertes.
 
-Cette version réalise uniquement un audit passif.
+Cette version exécute uniquement des contrôles passifs.
+Les vérifications actives seront ajoutées séparément.
 """
 
-from __future__ import annotations
+from app.scoring.rules import (
+    get_rule,
+)
 
-from urllib.parse import urlparse
 
-import requests
-
-from app.database.db import save_alert
-from app.scoring.risk_engine import build_security_alert
+from app.analyzers.web_checks.cookies import (
+    check_cookie_security,
+)
+from app.analyzers.web_checks.cors import (
+    check_cors,
+)
+from app.analyzers.web_checks.disclosure import (
+    check_information_disclosure,
+)
+from app.analyzers.web_checks.forms import (
+    check_forms_security,
+)
+from app.analyzers.web_checks.headers import (
+    check_security_headers,
+)
+from app.analyzers.web_checks.tls import (
+    check_tls_usage,
+)
+from app.collectors.web_collector import (
+    WebCollectionError,
+    request_with_scope,
+    validate_url,
+)
+from app.database.db import (
+    save_alert,
+)
+from app.scoring.risk_engine import (
+    build_security_alert,
+)
+from app.security.web_scope import (
+    build_allowed_domains,
+)
 
 
 # ============================================================
-# UTILITAIRES
+# RAPPORT
 # ============================================================
 
-def validate_web_url(url: str) -> tuple[bool, str | None]:
-    """
-    Valide une URL HTTP ou HTTPS.
 
-    Retour
-    ------
-    tuple[bool, str | None]
-        (valide, message_erreur)
-    """
-
-    if not url:
-        return False, "L'URL est vide."
-
-    url = url.strip()
-
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return False, "L'URL n'est pas valide."
-
-    if parsed.scheme not in {
-        "http",
-        "https",
-    }:
-        return (
-            False,
-            "Seuls les protocoles HTTP et HTTPS sont autorisés."
-        )
-
-    if not parsed.hostname:
-        return (
-            False,
-            "Aucun nom d'hôte valide n'a été détecté."
-        )
-
-    return True, None
-
-
-def build_check_result(
-    check_id: str,
-    name: str,
-    status: str,
-    message: str,
+def create_empty_report(
+    url: str,
 ) -> dict:
     """
-    Construit le résultat standardisé d'un contrôle.
-
-    status :
-    - PASSED
-    - FAILED
-    - SKIPPED
-    - INDETERMINATE
-    """
-
-    return {
-        "check_id": check_id,
-        "name": name,
-        "status": status,
-        "message": message,
-    }
-
-
-def build_web_detection(
-    *,
-    event_type: str,
-    target: str,
-    message: str,
-    description: str,
-    status_code: int | None = None,
-    classification: str = "MISCONFIGURATION",
-    confidence: str = "HIGH",
-) -> dict:
-    """
-    Construit une détection Web standardisée.
-    """
-
-    return {
-        "event_type": event_type,
-        "source_type": "WEB",
-        "target": target,
-        "url": target,
-        "status_code": status_code,
-        "message": message,
-        "description": description,
-        "status": "OPEN",
-        "classification": classification,
-        "confidence": confidence,
-    }
-
-
-# ============================================================
-# RAPPORT VIDE
-# ============================================================
-
-def create_empty_audit_report(
-    url: str
-) -> dict:
-    """
-    Initialise la structure du rapport Web.
+    Crée la structure standard d'un rapport d'audit Web.
     """
 
     return {
         "audit_status": "PENDING",
-
+        "mode": "PASSIVE",
         "requested_url": url,
-
         "final_url": None,
-
         "http_status": None,
-
-        "redirects": [],
-
         "request_count": 0,
-
+        "redirects": [],
+        "pages": [],
+        "forms": [],
         "checks": [],
+        "findings": [],
 
+        # Compatibilité temporaire avec les anciennes
+        # parties du projet utilisant encore "detections".
         "detections": [],
 
         "alerts": [],
-
         "errors": [],
+
+        "limitations": [
+            (
+                "Une seule page est analysée dans cette "
+                "version de l'audit."
+            ),
+            (
+                "Le JavaScript côté client n'est pas exécuté."
+            ),
+            (
+                "Les zones nécessitant une authentification "
+                "ne sont pas analysées automatiquement."
+            ),
+            (
+                "Les contrôles d'accès ne sont pas "
+                "automatiquement validés."
+            ),
+            (
+                "La présence d'une protection CSRF n'est pas "
+                "encore analysée automatiquement."
+            ),
+            (
+                "Les XSS stockées ne sont pas recherchées."
+            ),
+            (
+                "Les vulnérabilités de logique métier "
+                "nécessitent une validation manuelle."
+            ),
+            (
+                "Aucun contrôle actif SQLi, XSS réfléchie "
+                "ou redirection ouverte n'est exécuté."
+            ),
+        ],
 
         "coverage": {
             "executed": 0,
@@ -155,134 +127,244 @@ def create_empty_audit_report(
             "skipped": 0,
             "indeterminate": 0,
         },
+
+        "metadata": {
+            "active_checks_enabled": False,
+            "allowed_domains": [],
+        },
+
+        "finding_count": 0,
+        "alert_count": 0,
     }
 
 
 # ============================================================
-# CALCUL DE COUVERTURE
+# COUVERTURE
 # ============================================================
 
+
 def update_coverage(
-    report: dict
+    report: dict,
 ) -> None:
     """
-    Met à jour les statistiques des contrôles.
+    Recalcule les statistiques de couverture.
     """
 
     checks = report.get(
         "checks",
-        []
+        [],
     )
 
     report["coverage"] = {
-        "executed": len(
-            [
-                check
-                for check in checks
-                if check["status"]
-                in {
-                    "PASSED",
-                    "FAILED",
-                }
-            ]
+        "executed": sum(
+            1
+            for check in checks
+            if check.get("status")
+            in {
+                "PASSED",
+                "FAILED",
+            }
         ),
 
-        "passed": len(
-            [
-                check
-                for check in checks
-                if check["status"]
-                == "PASSED"
-            ]
+        "passed": sum(
+            1
+            for check in checks
+            if check.get("status")
+            == "PASSED"
         ),
 
-        "failed": len(
-            [
-                check
-                for check in checks
-                if check["status"]
-                == "FAILED"
-            ]
+        "failed": sum(
+            1
+            for check in checks
+            if check.get("status")
+            == "FAILED"
         ),
 
-        "skipped": len(
-            [
-                check
-                for check in checks
-                if check["status"]
-                == "SKIPPED"
-            ]
+        "skipped": sum(
+            1
+            for check in checks
+            if check.get("status")
+            == "SKIPPED"
         ),
 
-        "indeterminate": len(
-            [
-                check
-                for check in checks
-                if check["status"]
-                == "INDETERMINATE"
-            ]
+        "indeterminate": sum(
+            1
+            for check in checks
+            if check.get("status")
+            == "INDETERMINATE"
         ),
     }
+
+
+# ============================================================
+# ERREURS DE COLLECTE
+# ============================================================
+
+
+def get_collection_error_type(
+    message: str,
+) -> str:
+    """
+    Transforme une erreur du collecteur en type exploitable.
+    """
+
+    upper_message = (
+        message.upper()
+    )
+
+    known_errors = [
+        "TLS_ERROR",
+        "CONNECTION_TIMEOUT",
+        "READ_TIMEOUT",
+        "CONNECTION_ERROR",
+        "REQUEST_ERROR",
+    ]
+
+    for error_type in known_errors:
+
+        if error_type in upper_message:
+
+            return error_type
+
+    if (
+        "REDIRECTION"
+        in upper_message
+        and (
+            "PÉRIMÈTRE"
+            in upper_message
+            or "PERIMETRE"
+            in upper_message
+        )
+    ):
+        return "OUT_OF_SCOPE_REDIRECT"
+
+    if (
+        "HORS PÉRIMÈTRE"
+        in upper_message
+        or "HORS PERIMETRE"
+        in upper_message
+    ):
+        return "OUT_OF_SCOPE"
+
+    if (
+        "REDIRECTIONS"
+        in upper_message
+        and "MAXIMAL"
+        in upper_message
+    ):
+        return "TOO_MANY_REDIRECTS"
+
+    return "COLLECTION_ERROR"
+
+
+# ============================================================
+# AGRÉGATION
+# ============================================================
+
+
+def merge_check_result(
+    report: dict,
+    result: dict,
+) -> None:
+    """
+    Fusionne le résultat d'un module de contrôle
+    dans le rapport principal.
+    """
+
+    if not isinstance(
+        result,
+        dict,
+    ):
+        return
+
+    checks = result.get(
+        "checks",
+        [],
+    )
+
+    findings = result.get(
+        "findings",
+        [],
+    )
+
+    if checks:
+
+        report[
+            "checks"
+        ].extend(
+            checks
+        )
+
+    if findings:
+
+        report[
+            "findings"
+        ].extend(
+            findings
+        )
 
 
 # ============================================================
 # ANALYSE PASSIVE
 # ============================================================
 
+
 def analyze_web_security(
     url: str,
-    timeout: int = 10
+    timeout: int = 10,
+    allowed_domains: list[str] | None = None,
 ) -> dict:
     """
-    Exécute l'audit Web passif actuel.
+    Exécute l'audit passif d'une page Web.
 
-    Contrôles :
-    - validité URL ;
-    - HTTPS ;
-    - CSP ;
-    - HSTS ;
-    - X-Content-Type-Options ;
-    - X-Frame-Options ;
-    - Referrer-Policy.
-
-    Les erreurs réseau sont conservées dans
-    le rapport et ne sont jamais converties
-    en absence de vulnérabilité.
+    Aucun payload d'injection n'est envoyé.
     """
 
-    report = create_empty_audit_report(
+    report = create_empty_report(
         url
     )
 
 
     # ========================================================
-    # VALIDATION URL
+    # VALIDATION DE L'URL
     # ========================================================
 
     valid, validation_error = (
-        validate_web_url(
+        validate_url(
             url
         )
     )
 
     if not valid:
 
-        report["audit_status"] = "FAILED"
+        report[
+            "audit_status"
+        ] = "FAILED"
 
-        report["errors"].append(
+        report[
+            "errors"
+        ].append(
             {
                 "type": "INVALID_URL",
-                "message": validation_error,
+                "message": (
+                    validation_error
+                    or "URL invalide."
+                ),
             }
         )
 
-        report["checks"].append(
-            build_check_result(
-                check_id="URL_VALIDATION",
-                name="Validation de l'URL",
-                status="FAILED",
-                message=validation_error,
-            )
+        report[
+            "checks"
+        ].append(
+            {
+                "check_id": "URL_VALIDATION",
+                "name": "Validation de l'URL",
+                "status": "FAILED",
+                "message": (
+                    validation_error
+                    or "URL invalide."
+                ),
+            }
         )
 
         update_coverage(
@@ -295,612 +377,426 @@ def analyze_web_security(
     url = url.strip()
 
 
-    report["checks"].append(
-        build_check_result(
-            check_id="URL_VALIDATION",
-            name="Validation de l'URL",
-            status="PASSED",
-            message="URL valide."
-        )
+    report[
+        "checks"
+    ].append(
+        {
+            "check_id": "URL_VALIDATION",
+            "name": "Validation de l'URL",
+            "status": "PASSED",
+            "message": "URL valide.",
+        }
     )
 
 
     # ========================================================
-    # HTTPS
+    # PÉRIMÈTRE AUTORISÉ
     # ========================================================
 
-    if url.lower().startswith(
-        "https://"
-    ):
-
-        report["checks"].append(
-            build_check_result(
-                check_id="HTTPS",
-                name="Utilisation de HTTPS",
-                status="PASSED",
-                message=(
-                    "L'URL demandée utilise HTTPS."
-                )
-            )
+    scope = (
+        build_allowed_domains(
+            start_url=url,
+            extra_domains=allowed_domains,
         )
+    )
 
-    else:
+    report[
+        "metadata"
+    ][
+        "allowed_domains"
+    ] = sorted(
+        scope
+    )
 
-        report["checks"].append(
-            build_check_result(
-                check_id="HTTPS",
-                name="Utilisation de HTTPS",
-                status="FAILED",
-                message=(
-                    "L'URL demandée utilise HTTP."
-                )
-            )
-        )
 
-        report["detections"].append(
-            build_web_detection(
-                event_type="HTTPS_MISSING",
-                target=url,
-                message=(
-                    "Le site analysé n'utilise pas HTTPS."
+    if not scope:
+
+        report[
+            "audit_status"
+        ] = "FAILED"
+
+        report[
+            "errors"
+        ].append(
+            {
+                "type": "INVALID_SCOPE",
+                "message": (
+                    "Aucun domaine autorisé "
+                    "n'a pu être déterminé."
                 ),
-                description=(
-                    "La connexion initiale est effectuée "
-                    "via HTTP et n'est donc pas protégée "
-                    "par TLS."
-                ),
-                classification="MISCONFIGURATION",
-                confidence="HIGH",
-            )
+            }
         )
+
+        report[
+            "checks"
+        ].append(
+            {
+                "check_id": "WEB_SCOPE",
+                "name": "Périmètre de l'audit",
+                "status": "FAILED",
+                "message": (
+                    "Le périmètre autorisé "
+                    "est vide."
+                ),
+            }
+        )
+
+        update_coverage(
+            report
+        )
+
+        return report
+
+
+    report[
+        "checks"
+    ].append(
+        {
+            "check_id": "WEB_SCOPE",
+            "name": "Périmètre de l'audit",
+            "status": "PASSED",
+            "message": (
+                "Le périmètre de l'audit "
+                "a été défini."
+            ),
+        }
+    )
 
 
     # ========================================================
-    # REQUÊTE
+    # COLLECTE HTTP
     # ========================================================
 
     try:
 
-        response = requests.get(
-            url,
-            timeout=timeout,
-            allow_redirects=True,
-        )
-
-        report["request_count"] += 1
-
-
-    except requests.exceptions.SSLError as error:
-
-        report["audit_status"] = "FAILED"
-
-        report["errors"].append(
-            {
-                "type": "TLS_ERROR",
-                "message": str(error),
-            }
-        )
-
-        report["checks"].append(
-            build_check_result(
-                check_id="HTTP_REQUEST",
-                name="Requête HTTP",
-                status="INDETERMINATE",
-                message=(
-                    "La requête a échoué à cause "
-                    "d'une erreur TLS."
-                )
+        collection = (
+            request_with_scope(
+                url=url,
+                allowed_domains=scope,
+                timeout=timeout,
             )
         )
 
-        update_coverage(
-            report
+    except WebCollectionError as error:
+
+        error_message = str(
+            error
         )
 
-        return report
-
-
-    except requests.exceptions.ConnectTimeout as error:
-
-        report["audit_status"] = "FAILED"
-
-        report["errors"].append(
-            {
-                "type": "CONNECTION_TIMEOUT",
-                "message": str(error),
-            }
-        )
-
-        report["checks"].append(
-            build_check_result(
-                check_id="HTTP_REQUEST",
-                name="Requête HTTP",
-                status="INDETERMINATE",
-                message=(
-                    "Délai de connexion dépassé."
-                )
+        error_type = (
+            get_collection_error_type(
+                error_message
             )
         )
-
-        update_coverage(
-            report
-        )
-
-        return report
-
-
-    except requests.exceptions.ReadTimeout as error:
-
-        report["audit_status"] = "FAILED"
-
-        report["errors"].append(
-            {
-                "type": "READ_TIMEOUT",
-                "message": str(error),
-            }
-        )
-
-        report["checks"].append(
-            build_check_result(
-                check_id="HTTP_REQUEST",
-                name="Requête HTTP",
-                status="INDETERMINATE",
-                message=(
-                    "Le serveur n'a pas répondu "
-                    "dans le délai prévu."
-                )
-            )
-        )
-
-        update_coverage(
-            report
-        )
-
-        return report
-
-
-    except requests.exceptions.ConnectionError as error:
-
-        report["audit_status"] = "FAILED"
-
-        report["errors"].append(
-            {
-                "type": "CONNECTION_ERROR",
-                "message": str(error),
-            }
-        )
-
-        report["checks"].append(
-            build_check_result(
-                check_id="HTTP_REQUEST",
-                name="Requête HTTP",
-                status="INDETERMINATE",
-                message=(
-                    "Impossible d'établir "
-                    "la connexion avec la cible."
-                )
-            )
-        )
-
-        update_coverage(
-            report
-        )
-
-        return report
-
-
-    except requests.RequestException as error:
-
-        report["audit_status"] = "FAILED"
-
-        report["errors"].append(
-            {
-                "type": "REQUEST_ERROR",
-                "message": str(error),
-            }
-        )
-
-        report["checks"].append(
-            build_check_result(
-                check_id="HTTP_REQUEST",
-                name="Requête HTTP",
-                status="INDETERMINATE",
-                message=(
-                    "Erreur HTTP pendant l'analyse."
-                )
-            )
-        )
-
-        update_coverage(
-            report
-        )
-
-        return report
-
-
-    # ========================================================
-    # REQUÊTE RÉUSSIE
-    # ========================================================
-
-    report["checks"].append(
-        build_check_result(
-            check_id="HTTP_REQUEST",
-            name="Requête HTTP",
-            status="PASSED",
-            message="La cible a répondu."
-        )
-    )
-
-
-    report["final_url"] = str(
-        response.url
-    )
-
-    report["http_status"] = (
-        response.status_code
-    )
-
-
-    # ========================================================
-    # REDIRECTIONS
-    # ========================================================
-
-    for history_response in response.history:
 
         report[
-            "redirects"
+            "audit_status"
+        ] = "FAILED"
+
+        report[
+            "errors"
         ].append(
             {
-                "status_code": (
-                    history_response.status_code
-                ),
+                "type": error_type,
+                "message": error_message,
+            }
+        )
 
-                "url": str(
-                    history_response.url
-                ),
-
-                "location": (
-                    history_response.headers.get(
-                        "Location"
-                    )
+        report[
+            "checks"
+        ].append(
+            {
+                "check_id": "HTTP_COLLECTION",
+                "name": "Collecte HTTP",
+                "status": "INDETERMINATE",
+                "message": (
+                    "La collecte HTTP n'a "
+                    "pas pu être terminée."
                 ),
             }
         )
 
+        update_coverage(
+            report
+        )
 
-    final_url = report[
+        return report
+
+
+    response = collection[
+        "response"
+    ]
+
+    final_url = collection[
         "final_url"
     ]
 
-    headers = response.headers
 
+    report[
+        "final_url"
+    ] = final_url
 
-    # ========================================================
-    # CSP
-    # ========================================================
+    report[
+        "http_status"
+    ] = response.status_code
 
-    if headers.get(
-        "Content-Security-Policy"
-    ):
-
-        report["checks"].append(
-            build_check_result(
-                check_id="CSP",
-                name="Content-Security-Policy",
-                status="PASSED",
-                message=(
-                    "Une politique CSP est présente."
-                )
-            )
-        )
-
-    else:
-
-        report["checks"].append(
-            build_check_result(
-                check_id="CSP",
-                name="Content-Security-Policy",
-                status="FAILED",
-                message=(
-                    "Aucune politique CSP détectée."
-                )
-            )
-        )
-
-        report["detections"].append(
-            build_web_detection(
-                event_type="CSP_MISSING",
-                target=final_url,
-                status_code=response.status_code,
-                message=(
-                    "L'en-tête Content-Security-Policy "
-                    "est absent."
-                ),
-                description=(
-                    "Le site ne définit pas explicitement "
-                    "de politique Content-Security-Policy."
-                ),
-            )
-        )
-
-
-    # ========================================================
-    # HSTS
-    # ========================================================
-
-    if final_url.lower().startswith(
-        "https://"
-    ):
-
-        if headers.get(
-            "Strict-Transport-Security"
-        ):
-
-            report["checks"].append(
-                build_check_result(
-                    check_id="HSTS",
-                    name="Strict-Transport-Security",
-                    status="PASSED",
-                    message=(
-                        "L'en-tête HSTS est présent."
-                    )
-                )
-            )
-
-        else:
-
-            report["checks"].append(
-                build_check_result(
-                    check_id="HSTS",
-                    name="Strict-Transport-Security",
-                    status="FAILED",
-                    message=(
-                        "L'en-tête HSTS est absent."
-                    )
-                )
-            )
-
-            report["detections"].append(
-                build_web_detection(
-                    event_type="HSTS_MISSING",
-                    target=final_url,
-                    status_code=response.status_code,
-                    message=(
-                        "L'en-tête "
-                        "Strict-Transport-Security "
-                        "est absent."
-                    ),
-                    description=(
-                        "Le site répond via HTTPS mais "
-                        "n'impose pas HSTS."
-                    ),
-                )
-            )
-
-    else:
-
-        report["checks"].append(
-            build_check_result(
-                check_id="HSTS",
-                name="Strict-Transport-Security",
-                status="SKIPPED",
-                message=(
-                    "Contrôle HSTS non pertinent "
-                    "sur une réponse HTTP."
-                )
-            )
-        )
-
-
-    # ========================================================
-    # X-CONTENT-TYPE-OPTIONS
-    # ========================================================
-
-    if headers.get(
-        "X-Content-Type-Options"
-    ):
-
-        report["checks"].append(
-            build_check_result(
-                check_id="X_CONTENT_TYPE_OPTIONS",
-                name="X-Content-Type-Options",
-                status="PASSED",
-                message=(
-                    "L'en-tête est présent."
-                )
-            )
-        )
-
-    else:
-
-        report["checks"].append(
-            build_check_result(
-                check_id="X_CONTENT_TYPE_OPTIONS",
-                name="X-Content-Type-Options",
-                status="FAILED",
-                message=(
-                    "L'en-tête est absent."
-                )
-            )
-        )
-
-        report["detections"].append(
-            build_web_detection(
-                event_type=(
-                    "X_CONTENT_TYPE_OPTIONS_MISSING"
-                ),
-                target=final_url,
-                status_code=response.status_code,
-                message=(
-                    "L'en-tête X-Content-Type-Options "
-                    "est absent."
-                ),
-                description=(
-                    "Le serveur ne fournit pas "
-                    "X-Content-Type-Options."
-                ),
-            )
-        )
-
-
-    # ========================================================
-    # PROTECTION CONTRE LE FRAMING
-    # ========================================================
-
-    csp = headers.get(
-        "Content-Security-Policy",
-        ""
+    report[
+        "request_count"
+    ] = collection.get(
+        "request_count",
+        0,
     )
 
-    has_frame_ancestors = (
-        "frame-ancestors"
-        in csp.lower()
+    report[
+        "redirects"
+    ] = collection.get(
+        "redirects",
+        [],
     )
 
-    has_x_frame_options = bool(
-        headers.get(
-            "X-Frame-Options"
+
+    report[
+        "checks"
+    ].append(
+        {
+            "check_id": "HTTP_COLLECTION",
+            "name": "Collecte HTTP",
+            "status": "PASSED",
+            "message": (
+                "La réponse HTTP "
+                "a été collectée."
+            ),
+        }
+    )
+
+
+    # ========================================================
+    # INVENTAIRE DE LA PAGE
+    # ========================================================
+
+    content_type = (
+        response.headers.get(
+            "Content-Type",
+            "",
         )
+    )
+
+
+    report[
+        "pages"
+    ].append(
+        {
+            "url": final_url,
+            "status_code": (
+                response.status_code
+            ),
+            "content_type": (
+                content_type
+            ),
+        }
+    )
+
+
+    # ========================================================
+    # TLS / HTTPS
+    # ========================================================
+
+    tls_result = (
+        check_tls_usage(
+            requested_url=url,
+            final_url=final_url,
+            response=response,
+        )
+    )
+
+    merge_check_result(
+        report,
+        tls_result,
+    )
+
+
+    # ========================================================
+    # HEADERS HTTP
+    # ========================================================
+
+    headers_result = (
+        check_security_headers(
+            response=response,
+            target_url=final_url,
+        )
+    )
+
+    merge_check_result(
+        report,
+        headers_result,
+    )
+
+
+    # ========================================================
+    # COOKIES
+    # ========================================================
+
+    cookies_result = (
+        check_cookie_security(
+            response=response,
+            target_url=final_url,
+        )
+    )
+
+    merge_check_result(
+        report,
+        cookies_result,
+    )
+
+
+    # ========================================================
+    # CORS
+    # ========================================================
+
+    cors_result = (
+        check_cors(
+            response=response,
+            target_url=final_url,
+        )
+    )
+
+    merge_check_result(
+        report,
+        cors_result,
+    )
+
+
+    # ========================================================
+    # DIVULGATION D'INFORMATIONS
+    # ========================================================
+
+    disclosure_result = (
+        check_information_disclosure(
+            response=response,
+            target_url=final_url,
+        )
+    )
+
+    merge_check_result(
+        report,
+        disclosure_result,
+    )
+
+
+    # ========================================================
+    # FORMULAIRES
+    # ========================================================
+
+    content_type_lower = (
+        content_type.lower()
     )
 
 
     if (
-        has_frame_ancestors
-        or has_x_frame_options
+        "text/html"
+        in content_type_lower
+        or not content_type
     ):
 
-        report["checks"].append(
-            build_check_result(
-                check_id="FRAME_PROTECTION",
-                name="Protection contre le framing",
-                status="PASSED",
-                message=(
-                    "Une protection contre "
-                    "le framing est présente."
-                )
+        forms_result = (
+            check_forms_security(
+                html=response.text,
+                page_url=final_url,
             )
+        )
+
+        merge_check_result(
+            report,
+            forms_result,
+        )
+
+        report[
+            "forms"
+        ] = forms_result.get(
+            "forms",
+            [],
         )
 
     else:
 
-        report["checks"].append(
-            build_check_result(
-                check_id="FRAME_PROTECTION",
-                name="Protection contre le framing",
-                status="FAILED",
-                message=(
-                    "Aucune protection explicite "
-                    "contre le framing n'a été détectée."
-                )
-            )
-        )
-
-        report["detections"].append(
-            build_web_detection(
-                event_type=(
-                    "X_FRAME_OPTIONS_MISSING"
+        report[
+            "checks"
+        ].append(
+            {
+                "check_id": "FORMS_PRESENT",
+                "name": "Analyse des formulaires",
+                "status": "SKIPPED",
+                "message": (
+                    "Le contenu reçu "
+                    "n'est pas HTML."
                 ),
-                target=final_url,
-                status_code=response.status_code,
-                message=(
-                    "Aucune protection explicite "
-                    "contre le framing n'a été détectée."
-                ),
-                description=(
-                    "Ni X-Frame-Options ni une directive "
-                    "CSP frame-ancestors n'a été détectée."
-                ),
-            )
+            }
         )
 
 
     # ========================================================
-    # REFERRER POLICY
+    # COMPATIBILITÉ TEMPORAIRE
     # ========================================================
 
-    if headers.get(
-        "Referrer-Policy"
-    ):
-
-        report["checks"].append(
-            build_check_result(
-                check_id="REFERRER_POLICY",
-                name="Referrer-Policy",
-                status="PASSED",
-                message=(
-                    "Une politique Referrer-Policy "
-                    "est présente."
-                )
-            )
-        )
-
-    else:
-
-        report["checks"].append(
-            build_check_result(
-                check_id="REFERRER_POLICY",
-                name="Referrer-Policy",
-                status="FAILED",
-                message=(
-                    "Referrer-Policy est absent."
-                )
-            )
-        )
-
-        report["detections"].append(
-            build_web_detection(
-                event_type=(
-                    "REFERRER_POLICY_MISSING"
-                ),
-                target=final_url,
-                status_code=response.status_code,
-                message=(
-                    "L'en-tête Referrer-Policy "
-                    "est absent."
-                ),
-                description=(
-                    "Le serveur ne fournit pas "
-                    "de politique Referrer-Policy."
-                ),
-            )
-        )
+    report[
+        "detections"
+    ] = list(
+        report[
+            "findings"
+        ]
+    )
 
 
     # ========================================================
-    # FIN DE L'ANALYSE
+    # STATISTIQUES
     # ========================================================
+
+    report[
+        "finding_count"
+    ] = len(
+        report[
+            "findings"
+        ]
+    )
+
 
     update_coverage(
         report
     )
 
 
-    if report["errors"]:
+    if report[
+        "errors"
+    ]:
 
-        report["audit_status"] = (
-            "PARTIAL"
-        )
+        report[
+            "audit_status"
+        ] = "PARTIAL"
 
     else:
 
-        report["audit_status"] = (
-            "COMPLETED"
-        )
+        report[
+            "audit_status"
+        ] = "COMPLETED"
 
 
     return report
 
 
 # ============================================================
-# TRANSFORMATION EN ALERTES
+# PERSISTANCE DES FINDINGS
 # ============================================================
 
+
 def process_web_detections(
-    detections: list[dict]
+    detections: list[dict],
 ) -> list[dict]:
     """
-    Transforme uniquement les détections
-    de sécurité en alertes persistantes.
+    Transforme les findings compatibles avec
+    le moteur de scoring en alertes persistantes.
+
+    Un finding sans règle de scoring ne doit jamais
+    faire échouer l'intégralité de l'audit.
     """
 
     alerts = []
@@ -908,17 +804,79 @@ def process_web_detections(
 
     for detection in detections:
 
-        alert = build_security_alert(
-            detection
+        event_type = detection.get(
+            "event_type"
+        )
+        if get_rule(
+            event_type
+        ) is None:
+            continue
+
+        try:
+            alert = build_security_alert(
+                detection
+            )
+        except ValueError:
+            continue
+
+
+        alert_id = (
+            save_alert(
+                alert
+            )
         )
 
-        alert_id = save_alert(
-            alert
+        alert[
+            "id"
+        ] = alert_id
+
+
+        # ----------------------------------------------------
+        # Métadonnées propres au rapport Web
+        # ----------------------------------------------------
+
+        alert[
+            "classification"
+        ] = detection.get(
+            "classification"
         )
 
-        alert["id"] = (
-            alert_id
+        alert[
+            "severity"
+        ] = detection.get(
+            "severity"
         )
+
+        alert[
+            "confidence"
+        ] = detection.get(
+            "confidence"
+        )
+
+        alert[
+            "parameter"
+        ] = detection.get(
+            "parameter"
+        )
+
+        alert[
+            "evidence"
+        ] = detection.get(
+            "evidence"
+        )
+
+        alert[
+            "recommendation"
+        ] = detection.get(
+            "recommendation"
+        )
+
+        alert[
+            "validation_method"
+        ] = detection.get(
+            "validation_method"
+        )
+
 
         alerts.append(
             alert
@@ -932,40 +890,62 @@ def process_web_detections(
 # PIPELINE COMPLET
 # ============================================================
 
+
 def run_web_analysis(
     url: str,
-    timeout: int = 10
+    timeout: int = 10,
+    allowed_domains: list[str] | None = None,
 ) -> dict:
     """
-    Lance l'audit Web puis transforme
-    ses détections en alertes.
+    Lance l'audit Web passif complet.
+
+    Le résultat contient :
+    - état de l'audit ;
+    - couverture ;
+    - pages ;
+    - formulaires ;
+    - findings ;
+    - alertes ;
+    - erreurs ;
+    - limitations.
     """
 
-    report = analyze_web_security(
-        url=url,
-        timeout=timeout
+    report = (
+        analyze_web_security(
+            url=url,
+            timeout=timeout,
+            allowed_domains=allowed_domains,
+        )
     )
 
 
-    detections = report.get(
-        "detections",
-        []
+    findings = report.get(
+        "findings",
+        [],
     )
 
 
-    alerts = process_web_detections(
-        detections
+    alerts = (
+        process_web_detections(
+            findings
+        )
     )
 
 
-    report["alerts"] = alerts
+    report[
+        "alerts"
+    ] = alerts
 
-    report["alert_count"] = len(
+    report[
+        "finding_count"
+    ] = len(
+        findings
+    )
+
+    report[
+        "alert_count"
+    ] = len(
         alerts
-    )
-
-    report["finding_count"] = len(
-        detections
     )
 
 

@@ -2,17 +2,33 @@ from unittest.mock import Mock, patch
 
 import requests
 
+from requests.cookies import (
+    RequestsCookieJar,
+)
+
 from app.analyzers.web_analyzer import (
     analyze_web_security,
     process_web_detections,
     run_web_analysis,
-    validate_web_url,
+)
+
+from app.collectors.web_collector import (
+    validate_url,
 )
 
 
-def test_valid_https_url():
+# ============================================================
+# VALIDATION URL
+# ============================================================
 
-    valid, error = validate_web_url(
+
+def test_valid_https_url():
+    """
+    Vérifie qu'une URL HTTPS valide
+    est correctement acceptée.
+    """
+
+    valid, error = validate_url(
         "https://example.com"
     )
 
@@ -21,8 +37,12 @@ def test_valid_https_url():
 
 
 def test_invalid_url_scheme():
+    """
+    Vérifie qu'un protocole non HTTP/HTTPS
+    est refusé.
+    """
 
-    valid, error = validate_web_url(
+    valid, error = validate_url(
         "ftp://example.com"
     )
 
@@ -31,8 +51,12 @@ def test_invalid_url_scheme():
 
 
 def test_invalid_url_without_host():
+    """
+    Vérifie qu'une URL sans hostname
+    est refusée.
+    """
 
-    valid, error = validate_web_url(
+    valid, error = validate_url(
         "https://"
     )
 
@@ -40,12 +64,21 @@ def test_invalid_url_without_host():
     assert error is not None
 
 
+# ============================================================
+# HEADERS DE SÉCURITÉ MANQUANTS
+# ============================================================
+
+
 @patch(
-    "app.analyzers.web_analyzer.requests.get"
+    "app.collectors.web_collector.requests.get"
 )
 def test_missing_security_headers(
     mock_get
 ):
+    """
+    Vérifie que les principaux headers manquants
+    sont détectés.
+    """
 
     response = Mock()
 
@@ -55,13 +88,22 @@ def test_missing_security_headers(
 
     response.status_code = 200
 
-    response.headers = {}
+    response.headers = {
+        "Content-Type": "text/html",
+    }
 
-    response.history = []
-
-    mock_get.return_value = (
-        response
+    response.cookies = (
+        RequestsCookieJar()
     )
+
+    response.text = (
+        "<html><body></body></html>"
+    )
+
+    response.is_redirect = False
+    response.is_permanent_redirect = False
+
+    mock_get.return_value = response
 
 
     report = analyze_web_security(
@@ -72,7 +114,7 @@ def test_missing_security_headers(
     event_types = {
         item["event_type"]
         for item
-        in report["detections"]
+        in report["findings"]
     }
 
 
@@ -108,12 +150,21 @@ def test_missing_security_headers(
     )
 
 
+# ============================================================
+# HEADERS CORRECTEMENT CONFIGURÉS
+# ============================================================
+
+
 @patch(
-    "app.analyzers.web_analyzer.requests.get"
+    "app.collectors.web_collector.requests.get"
 )
 def test_secure_headers(
     mock_get
 ):
+    """
+    Vérifie que des headers correctement configurés
+    ne génèrent pas de finding correspondant.
+    """
 
     response = Mock()
 
@@ -124,6 +175,8 @@ def test_secure_headers(
     response.status_code = 200
 
     response.headers = {
+        "Content-Type": "text/html",
+
         "Content-Security-Policy": (
             "default-src 'self'; "
             "frame-ancestors 'none'"
@@ -146,11 +199,18 @@ def test_secure_headers(
         ),
     }
 
-    response.history = []
-
-    mock_get.return_value = (
-        response
+    response.cookies = (
+        RequestsCookieJar()
     )
+
+    response.text = (
+        "<html><body></body></html>"
+    )
+
+    response.is_redirect = False
+    response.is_permanent_redirect = False
+
+    mock_get.return_value = response
 
 
     report = analyze_web_security(
@@ -158,10 +218,26 @@ def test_secure_headers(
     )
 
 
+    relevant_events = {
+        finding["event_type"]
+        for finding
+        in report["findings"]
+        if finding["event_type"]
+        in {
+            "CSP_MISSING",
+            "HSTS_MISSING",
+            "X_CONTENT_TYPE_OPTIONS_MISSING",
+            "X_FRAME_OPTIONS_MISSING",
+            "REFERRER_POLICY_MISSING",
+        }
+    }
+
+
     assert (
-        report["detections"]
-        == []
+        relevant_events
+        == set()
     )
+
 
     assert (
         report["audit_status"]
@@ -169,12 +245,21 @@ def test_secure_headers(
     )
 
 
+# ============================================================
+# HTTP
+# ============================================================
+
+
 @patch(
-    "app.analyzers.web_analyzer.requests.get"
+    "app.collectors.web_collector.requests.get"
 )
 def test_http_is_detected(
     mock_get
 ):
+    """
+    Vérifie qu'une URL HTTP génère
+    une détection HTTPS_MISSING.
+    """
 
     response = Mock()
 
@@ -184,13 +269,22 @@ def test_http_is_detected(
 
     response.status_code = 200
 
-    response.headers = {}
+    response.headers = {
+        "Content-Type": "text/html",
+    }
 
-    response.history = []
-
-    mock_get.return_value = (
-        response
+    response.cookies = (
+        RequestsCookieJar()
     )
+
+    response.text = (
+        "<html></html>"
+    )
+
+    response.is_redirect = False
+    response.is_permanent_redirect = False
+
+    mock_get.return_value = response
 
 
     report = analyze_web_security(
@@ -201,7 +295,7 @@ def test_http_is_detected(
     event_types = {
         item["event_type"]
         for item
-        in report["detections"]
+        in report["findings"]
     }
 
 
@@ -211,12 +305,21 @@ def test_http_is_detected(
     )
 
 
+# ============================================================
+# TIMEOUT
+# ============================================================
+
+
 @patch(
-    "app.analyzers.web_analyzer.requests.get"
+    "app.collectors.web_collector.requests.get"
 )
 def test_timeout_is_not_zero_findings(
     mock_get
 ):
+    """
+    Vérifie qu'un timeout ne soit jamais interprété
+    comme une absence de vulnérabilité.
+    """
 
     mock_get.side_effect = (
         requests.exceptions.ReadTimeout(
@@ -235,6 +338,7 @@ def test_timeout_is_not_zero_findings(
         == "FAILED"
     )
 
+
     assert (
         len(
             report["errors"]
@@ -242,10 +346,12 @@ def test_timeout_is_not_zero_findings(
         == 1
     )
 
+
     assert (
         report["errors"][0]["type"]
         == "READ_TIMEOUT"
     )
+
 
     assert (
         report["coverage"][
@@ -255,12 +361,21 @@ def test_timeout_is_not_zero_findings(
     )
 
 
+# ============================================================
+# TLS
+# ============================================================
+
+
 @patch(
-    "app.analyzers.web_analyzer.requests.get"
+    "app.collectors.web_collector.requests.get"
 )
 def test_tls_error_is_reported(
     mock_get
 ):
+    """
+    Vérifie qu'une erreur TLS soit signalée
+    comme erreur d'analyse.
+    """
 
     mock_get.side_effect = (
         requests.exceptions.SSLError(
@@ -279,43 +394,66 @@ def test_tls_error_is_reported(
         == "FAILED"
     )
 
+
+    assert (
+        len(
+            report["errors"]
+        )
+        == 1
+    )
+
+
     assert (
         report["errors"][0]["type"]
         == "TLS_ERROR"
     )
 
 
+# ============================================================
+# REDIRECTION
+# ============================================================
+
+
 @patch(
-    "app.analyzers.web_analyzer.requests.get"
+    "app.collectors.web_collector.requests.get"
 )
 def test_redirect_is_recorded(
     mock_get
 ):
+    """
+    Vérifie que les redirections internes au scope
+    sont enregistrées.
+    """
 
-    redirect = Mock()
+    redirect_response = Mock()
 
-    redirect.status_code = 301
-
-    redirect.url = (
+    redirect_response.url = (
         "http://example.com"
     )
 
-    redirect.headers = {
+    redirect_response.status_code = 301
+
+    redirect_response.headers = {
         "Location": (
             "https://example.com"
         )
     }
 
+    redirect_response.is_redirect = True
+    redirect_response.is_permanent_redirect = True
 
-    response = Mock()
 
-    response.url = (
+    final_response = Mock()
+
+    final_response.url = (
         "https://example.com"
     )
 
-    response.status_code = 200
+    final_response.status_code = 200
 
-    response.headers = {
+    final_response.headers = {
+        "Content-Type": "text/html",
+
         "Content-Security-Policy": (
             "default-src 'self'"
         ),
@@ -337,13 +475,22 @@ def test_redirect_is_recorded(
         ),
     }
 
-    response.history = [
-        redirect
-    ]
-
-    mock_get.return_value = (
-        response
+    final_response.cookies = (
+        RequestsCookieJar()
     )
+
+    final_response.text = (
+        "<html></html>"
+    )
+
+    final_response.is_redirect = False
+    final_response.is_permanent_redirect = False
+
+
+    mock_get.side_effect = [
+        redirect_response,
+        final_response,
+    ]
 
 
     report = analyze_web_security(
@@ -358,10 +505,39 @@ def test_redirect_is_recorded(
         == 1
     )
 
+
     assert (
         report["final_url"]
         == "https://example.com"
     )
+
+
+    assert (
+        report["request_count"]
+        == 2
+    )
+
+
+    redirect = (
+        report["redirects"][0]
+    )
+
+
+    assert (
+        redirect["status_code"]
+        == 301
+    )
+
+
+    assert (
+        redirect["allowed"]
+        is True
+    )
+
+
+# ============================================================
+# PROCESS WEB DETECTIONS
+# ============================================================
 
 
 @patch(
@@ -370,6 +546,10 @@ def test_redirect_is_recorded(
 def test_process_web_detections(
     mock_save
 ):
+    """
+    Vérifie la transformation d'un finding
+    connu en alerte persistante.
+    """
 
     mock_save.return_value = 10
 
@@ -390,6 +570,14 @@ def test_process_web_detections(
                 "https://example.com"
             ),
 
+            "classification": (
+                "MISCONFIGURATION"
+            ),
+
+            "severity": "LOW",
+
+            "confidence": "HIGH",
+
             "message": (
                 "CSP absent."
             ),
@@ -398,11 +586,15 @@ def test_process_web_detections(
                 "CSP absent."
             ),
 
-            "classification": (
-                "MISCONFIGURATION"
+            "recommendation": (
+                "Configurer une politique CSP."
             ),
 
-            "confidence": "HIGH",
+            "validation_method": (
+                "Inspecter les headers HTTP."
+            ),
+
+            "status": "OPEN",
         }
     ]
 
@@ -414,14 +606,91 @@ def test_process_web_detections(
     )
 
 
-    assert len(
-        alerts
-    ) == 1
+    assert (
+        len(
+            alerts
+        )
+        == 1
+    )
+
 
     assert (
         alerts[0]["id"]
         == 10
     )
+
+
+    assert (
+        alerts[0]["source_type"]
+        == "WEB"
+    )
+
+
+    assert (
+        alerts[0]["event_type"]
+        == "CSP_MISSING"
+    )
+
+
+# ============================================================
+# FINDING INCONNU
+# ============================================================
+
+
+@patch(
+    "app.analyzers.web_analyzer.save_alert"
+)
+def test_unknown_web_finding_is_not_persisted(
+    mock_save
+):
+    """
+    Un finding sans règle de scoring doit rester
+    exploitable dans le rapport mais ne doit pas
+    devenir une alerte persistante.
+    """
+
+    detections = [
+        {
+            "event_type": (
+                "UNKNOWN_WEB_CHECK"
+            ),
+
+            "source_type": "WEB",
+
+            "target": (
+                "https://example.com"
+            ),
+
+            "message": (
+                "Résultat expérimental."
+            ),
+
+            "description": (
+                "Aucune règle de scoring."
+            ),
+        }
+    ]
+
+
+    alerts = (
+        process_web_detections(
+            detections
+        )
+    )
+
+
+    assert (
+        alerts
+        == []
+    )
+
+
+    mock_save.assert_not_called()
+
+
+# ============================================================
+# PIPELINE COMPLET
+# ============================================================
 
 
 @patch(
@@ -434,25 +703,46 @@ def test_run_web_analysis(
     mock_analyze,
     mock_process
 ):
+    """
+    Vérifie que run_web_analysis utilise désormais
+    findings comme source principale des alertes.
+    """
+
+    findings = [
+        {
+            "event_type": (
+                "CSP_MISSING"
+            )
+        }
+    ]
+
 
     report = {
         "audit_status": (
             "COMPLETED"
         ),
 
-        "detections": [
-            {
-                "event_type": (
-                    "CSP_MISSING"
-                )
-            }
-        ],
+        "mode": "PASSIVE",
+
+        "requested_url": (
+            "https://example.com"
+        ),
+
+        "final_url": (
+            "https://example.com"
+        ),
+
+        "findings": findings,
+
+        "detections": findings,
 
         "checks": [],
 
         "errors": [],
 
         "coverage": {},
+
+        "alerts": [],
     }
 
 
@@ -468,6 +758,8 @@ def test_run_web_analysis(
             ),
 
             "risk_score": 15,
+
+            "risk_level": "LOW",
         }
     ]
 
@@ -482,13 +774,28 @@ def test_run_web_analysis(
         == 1
     )
 
+
     assert (
         result["alert_count"]
         == 1
     )
 
 
+    assert (
+        len(
+            result["alerts"]
+        )
+        == 1
+    )
+
+
     mock_analyze.assert_called_once_with(
         url="https://example.com",
-        timeout=10
+        timeout=10,
+        allowed_domains=None,
+    )
+
+
+    mock_process.assert_called_once_with(
+        findings
     )
