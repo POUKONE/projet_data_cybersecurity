@@ -2,6 +2,8 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from api_client import run_web_audit
+
 
 API_URL = "http://127.0.0.1:8000"
 

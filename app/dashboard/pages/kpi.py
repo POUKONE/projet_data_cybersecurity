@@ -2,6 +2,10 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from api_client import (
+    get_alerts,
+    get_events,
+)
 
 API_URL = "http://127.0.0.1:8000"
 
