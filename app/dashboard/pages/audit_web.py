@@ -1,10 +1,3 @@
-"""
-Dashboard Streamlit de l'audit Web.
-
-Cette page affiche les résultats de l'audit passif
-renvoyés par FastAPI.
-"""
-
 import json
 
 import pandas as pd
@@ -17,46 +10,26 @@ from api_client import (
 
 
 # ============================================================
-# TITRE
+# PAGE
 # ============================================================
+
 
 st.title(
     "Audit Web"
 )
 
-st.markdown(
-    """
-    Analyse passive de la configuration et de plusieurs
-    mécanismes de sécurité d'une application Web.
-    """
-)
-
 st.caption(
-    "L'absence de résultat ne garantit pas "
-    "l'absence de vulnérabilités."
-)
-
-
-# ============================================================
-# FORMULAIRE
-# ============================================================
-
-url = st.text_input(
-    "URL à analyser",
-    placeholder=(
-        "https://example.com"
-    ),
-)
-
-
-launch = st.button(
-    "Lancer l'audit",
+    (
+        "Analyse passive de la configuration de sécurité "
+        "d'une application Web."
+    )
 )
 
 
 # ============================================================
 # SESSION
 # ============================================================
+
 
 if "web_audit_report" not in st.session_state:
 
@@ -66,61 +39,105 @@ if "web_audit_report" not in st.session_state:
 
 
 # ============================================================
-# LANCEMENT DE L'AUDIT
+# FORMULAIRE
 # ============================================================
 
-if launch:
 
-    clean_url = (
-        url.strip()
+url = st.text_input(
+    "URL à analyser",
+    placeholder=(
+        "https://example.com"
+    ),
+)
+
+
+col1, col2 = st.columns(
+    2
+)
+
+
+with col1:
+
+    max_depth = st.number_input(
+        "Profondeur maximale",
+        min_value=0,
+        max_value=5,
+        value=2,
+        step=1,
     )
 
 
-    if not clean_url:
+with col2:
 
-        st.warning(
-            "Veuillez renseigner une URL."
+    max_pages = st.number_input(
+        "Nombre maximal de pages",
+        min_value=1,
+        max_value=100,
+        value=20,
+        step=1,
+    )
+
+
+launch_audit = st.button(
+    "Lancer l'audit"
+)
+
+
+# ============================================================
+# EXÉCUTION
+# ============================================================
+
+
+if launch_audit:
+
+    if not url.strip():
+
+        st.error(
+            "Veuillez saisir une URL."
         )
 
-        st.stop()
+    else:
+
+        try:
+
+            with st.spinner(
+                "Audit en cours..."
+            ):
+
+                report = run_web_audit(
+                    url.strip()
+                )
 
 
-    try:
+            st.session_state[
+                "web_audit_report"
+            ] = report
 
-        with st.spinner(
-            "Audit Web en cours..."
-        ):
 
-            report = (
-                run_web_audit(
-                    clean_url
+        except requests.RequestException as error:
+
+            st.error(
+                (
+                    "Impossible de contacter "
+                    f"l'API : {error}"
                 )
             )
 
 
-        st.session_state[
-            "web_audit_report"
-        ] = report
+        except Exception as error:
 
-
-    except requests.RequestException as error:
-
-        st.error(
-            "Impossible de communiquer avec l'API."
-        )
-
-        st.code(
-            str(
-                error
+            st.error(
+                (
+                    "Erreur pendant l'audit : "
+                    f"{error}"
+                )
             )
-        )
-
-        st.stop()
 
 
 # ============================================================
 # RAPPORT
 # ============================================================
+
 
 report = st.session_state.get(
     "web_audit_report"
@@ -130,15 +147,19 @@ report = st.session_state.get(
 if not report:
 
     st.info(
-        "Renseignez une URL puis lancez un audit."
+        (
+            "Saisissez une URL puis lancez "
+            "l'audit pour afficher les résultats."
+        )
     )
 
     st.stop()
 
 
 # ============================================================
-# ÉTAT DE L'AUDIT
+# ÉTAT GLOBAL
 # ============================================================
+
 
 st.divider()
 
@@ -147,35 +168,10 @@ st.subheader(
 )
 
 
-audit_status = report.get(
+status = report.get(
     "audit_status",
     "UNKNOWN",
 )
-
-
-if audit_status == "COMPLETED":
-
-    st.success(
-        "Audit terminé."
-    )
-
-elif audit_status == "PARTIAL":
-
-    st.warning(
-        "Audit partiellement terminé."
-    )
-
-elif audit_status == "FAILED":
-
-    st.error(
-        "L'audit n'a pas pu être réalisé correctement."
-    )
-
-else:
-
-    st.info(
-        f"Statut : {audit_status}"
-    )
 
 
 mode = report.get(
@@ -184,163 +180,211 @@ mode = report.get(
 )
 
 
-st.write(
-    f"Mode : {mode}"
+col1, col2 = st.columns(
+    2
 )
 
 
+with col1:
+
+    st.metric(
+        "Statut",
+        status,
+    )
+
+
+with col2:
+
+    st.metric(
+        "Mode",
+        mode,
+    )
+
+
+if status == "FAILED":
+
+    st.error(
+        "L'audit n'a pas pu être exécuté correctement."
+    )
+
+
+elif status == "PARTIAL":
+
+    st.warning(
+        (
+            "L'audit a été exécuté partiellement. "
+            "Certaines pages ou vérifications ont échoué."
+        )
+    )
+
+
+elif status == "COMPLETED":
+
+    st.success(
+        "L'audit passif est terminé."
+    )
+
+
 # ============================================================
-# INFORMATIONS SUR LA CIBLE
+# CIBLE
 # ============================================================
 
-st.divider()
 
 st.subheader(
     "Cible"
 )
 
 
-requested_url = report.get(
-    "requested_url"
-)
-
-final_url = report.get(
-    "final_url"
-)
-
-http_status = report.get(
-    "http_status"
-)
-
-request_count = report.get(
-    "request_count",
-    0,
-)
-
-
-c1, c2 = st.columns(2)
-
-c1.metric(
-    "URL demandée",
-    requested_url or "-",
-)
-
-c2.metric(
-    "URL finale",
-    final_url or "-",
-)
-
-
-c3, c4 = st.columns(2)
-
-c3.metric(
-    "Statut HTTP",
-    (
-        http_status
-        if http_status is not None
-        else "-"
+target_data = {
+    "URL demandée": (
+        report.get(
+            "requested_url"
+        )
     ),
-)
 
-c4.metric(
-    "Requêtes effectuées",
-    request_count,
+    "URL finale": (
+        report.get(
+            "final_url"
+        )
+    ),
+
+    "Code HTTP": (
+        report.get(
+            "http_status"
+        )
+    ),
+
+    "Requêtes HTTP": (
+        report.get(
+            "request_count",
+            0,
+        )
+    ),
+}
+
+
+st.dataframe(
+    pd.DataFrame(
+        [
+            target_data
+        ]
+    ),
+    use_container_width=True,
+    hide_index=True,
 )
 
 
 # ============================================================
-# PÉRIMÈTRE
+# SCOPE
 # ============================================================
 
-metadata = report.get(
-    "metadata",
-    {},
-)
 
-allowed_domains = metadata.get(
-    "allowed_domains",
-    [],
+st.subheader(
+    "Périmètre autorisé"
 )
 
 
-st.write(
-    "Domaines autorisés :",
-    (
+allowed_domains = (
+    report.get(
+        "metadata",
+        {},
+    ).get(
+        "allowed_domains",
+        [],
+    )
+)
+
+
+if allowed_domains:
+
+    st.write(
         ", ".join(
             allowed_domains
         )
-        if allowed_domains
-        else "-"
-    ),
-)
+    )
+
+else:
+
+    st.write(
+        "Non disponible"
+    )
 
 
 # ============================================================
-# COUVERTURE
+# CRAWL
 # ============================================================
 
-st.divider()
 
 st.subheader(
-    "Couverture de l'audit"
+    "Exploration du site"
 )
 
 
-coverage = report.get(
-    "coverage",
+crawl = report.get(
+    "crawl",
     {},
 )
 
 
-c1, c2, c3, c4, c5 = (
-    st.columns(5)
+crawl_col1, crawl_col2, crawl_col3, crawl_col4 = (
+    st.columns(
+        4
+    )
 )
 
 
-c1.metric(
-    "Exécutés",
-    coverage.get(
-        "executed",
-        0,
-    ),
-)
+with crawl_col1:
 
-c2.metric(
-    "Réussis",
-    coverage.get(
-        "passed",
-        0,
-    ),
-)
+    st.metric(
+        "Pages visitées",
+        crawl.get(
+            "visited_count",
+            0,
+        ),
+    )
 
-c3.metric(
-    "Échoués",
-    coverage.get(
-        "failed",
-        0,
-    ),
-)
 
-c4.metric(
-    "Ignorés",
-    coverage.get(
-        "skipped",
-        0,
-    ),
-)
+with crawl_col2:
 
-c5.metric(
-    "Indéterminés",
-    coverage.get(
-        "indeterminate",
-        0,
-    ),
-)
+    st.metric(
+        "URLs découvertes",
+        crawl.get(
+            "discovered_count",
+            0,
+        ),
+    )
+
+
+with crawl_col3:
+
+    st.metric(
+        "Profondeur max",
+        crawl.get(
+            "max_depth",
+            0,
+        ),
+    )
+
+
+with crawl_col4:
+
+    st.metric(
+        "Durée du crawl",
+        (
+            f"{crawl.get('duration_seconds', 0)} s"
+        ),
+    )
 
 
 # ============================================================
-# SYNTHÈSE DES RÉSULTATS
+# RÉSUMÉ
 # ============================================================
+
+
+st.subheader(
+    "Résumé sécurité"
+)
+
 
 findings = report.get(
     "findings",
@@ -351,89 +395,249 @@ findings = report.get(
 )
 
 
-finding_count = len(
-    findings
-)
-
-
 alerts = report.get(
     "alerts",
     [],
 )
 
 
-s1, s2, s3 = st.columns(
-    3
-)
-
-
-s1.metric(
-    "Résultats détectés",
-    finding_count,
-)
-
-s2.metric(
-    "Alertes enregistrées",
-    len(
-        alerts
-    ),
-)
-
-s3.metric(
-    "Pages analysées",
-    len(
-        report.get(
-            "pages",
-            [],
-        )
-    ),
-)
-
-
-# ============================================================
-# ERREURS
-# ============================================================
-
-errors = report.get(
-    "errors",
+pages = report.get(
+    "pages",
     [],
 )
 
 
-if errors:
+forms = report.get(
+    "forms",
+    [],
+)
 
-    st.divider()
 
-    st.subheader(
-        "Erreurs d'analyse"
+summary_col1, summary_col2, summary_col3, summary_col4 = (
+    st.columns(
+        4
+    )
+)
+
+
+with summary_col1:
+
+    st.metric(
+        "Findings",
+        len(
+            findings
+        ),
     )
 
 
-    for error in errors:
+with summary_col2:
 
-        error_type = error.get(
-            "type",
-            "ERROR",
+    st.metric(
+        "Alertes",
+        len(
+            alerts
+        ),
+    )
+
+
+with summary_col3:
+
+    st.metric(
+        "Pages",
+        len(
+            pages
+        ),
+    )
+
+
+with summary_col4:
+
+    st.metric(
+        "Formulaires",
+        len(
+            forms
+        ),
+    )
+
+
+# ============================================================
+# COUVERTURE
+# ============================================================
+
+
+st.subheader(
+    "Couverture des contrôles"
+)
+
+
+coverage = report.get(
+    "coverage",
+    {},
+)
+
+
+coverage_columns = st.columns(
+    6
+)
+
+
+coverage_values = [
+    (
+        "Total",
+        coverage.get(
+            "total",
+            0,
+        ),
+    ),
+    (
+        "Exécutés",
+        coverage.get(
+            "executed",
+            0,
+        ),
+    ),
+    (
+        "Réussis",
+        coverage.get(
+            "passed",
+            0,
+        ),
+    ),
+    (
+        "Échecs",
+        coverage.get(
+            "failed",
+            0,
+        ),
+    ),
+    (
+        "Ignorés",
+        coverage.get(
+            "skipped",
+            0,
+        ),
+    ),
+    (
+        "Indéterminés",
+        coverage.get(
+            "indeterminate",
+            0,
+        ),
+    ),
+]
+
+
+for column, (
+    label,
+    value,
+) in zip(
+    coverage_columns,
+    coverage_values,
+):
+
+    with column:
+
+        st.metric(
+            label,
+            value,
         )
 
-        error_message = error.get(
-            "message",
-            "",
-        )
 
-        st.error(
-            (
-                f"{error_type} : "
-                f"{error_message}"
-            )
-        )
+# ============================================================
+# PAGES VISITÉES
+# ============================================================
+
+
+st.subheader(
+    "Pages visitées"
+)
+
+
+if pages:
+
+    pages_df = pd.DataFrame(
+        pages
+    )
+
+
+    preferred_columns = [
+        "depth",
+        "status_code",
+        "url",
+        "final_url",
+        "content_type",
+    ]
+
+
+    existing_columns = [
+        column
+        for column
+        in preferred_columns
+        if column
+        in pages_df.columns
+    ]
+
+
+    pages_df = pages_df[
+        existing_columns
+    ]
+
+
+    st.dataframe(
+        pages_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+else:
+
+    st.info(
+        "Aucune page visitée."
+    )
+
+
+# ============================================================
+# URL IGNORÉES
+# ============================================================
+
+
+st.subheader(
+    "URLs ignorées"
+)
+
+
+skipped_urls = report.get(
+    "skipped_urls",
+    [],
+)
+
+
+if skipped_urls:
+
+    skipped_df = pd.DataFrame(
+        skipped_urls
+    )
+
+
+    st.dataframe(
+        skipped_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+else:
+
+    st.info(
+        "Aucune URL ignorée."
+    )
 
 
 # ============================================================
 # REDIRECTIONS
 # ============================================================
 
-st.divider()
 
 st.subheader(
     "Redirections"
@@ -448,62 +652,19 @@ redirects = report.get(
 
 if redirects:
 
-    redirects_df = (
+    st.dataframe(
         pd.DataFrame(
             redirects
-        )
-    )
-
-
-    st.dataframe(
-        redirects_df,
+        ),
         use_container_width=True,
         hide_index=True,
     )
 
-else:
-
-    st.info(
-        "Aucune redirection observée."
-    )
-
-
-# ============================================================
-# PAGES ANALYSÉES
-# ============================================================
-
-st.divider()
-
-st.subheader(
-    "Pages analysées"
-)
-
-
-pages = report.get(
-    "pages",
-    [],
-)
-
-
-if pages:
-
-    pages_df = (
-        pd.DataFrame(
-            pages
-        )
-    )
-
-
-    st.dataframe(
-        pages_df,
-        use_container_width=True,
-        hide_index=True,
-    )
 
 else:
 
     st.info(
-        "Aucune page analysée."
+        "Aucune redirection détectée."
     )
 
 
@@ -511,66 +672,54 @@ else:
 # FORMULAIRES
 # ============================================================
 
-st.divider()
 
 st.subheader(
     "Formulaires détectés"
 )
 
 
-forms = report.get(
-    "forms",
-    [],
-)
-
-
-if not forms:
-
-    st.info(
-        "Aucun formulaire détecté."
-    )
-
-else:
-
-    st.metric(
-        "Nombre de formulaires",
-        len(
-            forms
-        ),
-    )
-
+if forms:
 
     for index, form in enumerate(
         forms,
         start=1,
     ):
 
-        method = form.get(
-            "method",
-            "GET",
-        )
-
-        action = form.get(
-            "action",
-            "-",
+        title = (
+            f"Formulaire {index} - "
+            f"{form.get('method', 'GET')} - "
+            f"{form.get('action', 'Action inconnue')}"
         )
 
 
         with st.expander(
-            (
-                f"Formulaire {index} - "
-                f"{method} {action}"
-            )
+            title
         ):
 
             st.write(
-                "Méthode :",
-                method,
+                "Page :",
+                form.get(
+                    "page_url",
+                    "Non disponible",
+                ),
             )
+
+
+            st.write(
+                "Méthode :",
+                form.get(
+                    "method",
+                    "Non disponible",
+                ),
+            )
+
 
             st.write(
                 "Action :",
-                action,
+                form.get(
+                    "action",
+                    "Non disponible",
+                ),
             )
 
 
@@ -592,16 +741,22 @@ else:
 
             else:
 
-                st.info(
-                    "Aucun champ détecté."
+                st.write(
+                    "Aucun champ identifié."
                 )
 
 
+else:
+
+    st.info(
+        "Aucun formulaire détecté."
+    )
+
+
 # ============================================================
-# CONTRÔLES
+# CHECKS
 # ============================================================
 
-st.divider()
 
 st.subheader(
     "Contrôles exécutés"
@@ -614,293 +769,267 @@ checks = report.get(
 )
 
 
-if not checks:
-
-    st.info(
-        "Aucun contrôle enregistré."
-    )
-
-else:
-
-    checks_df = (
-        pd.DataFrame(
-            checks
-        )
-    )
-
+if checks:
 
     check_statuses = sorted(
-        checks_df.get(
-            "status",
-            pd.Series(
-                dtype=str
-            ),
-        )
-        .dropna()
-        .astype(str)
-        .unique()
-        .tolist()
+        {
+            str(
+                check.get(
+                    "status",
+                    "UNKNOWN",
+                )
+            )
+            for check
+            in checks
+        }
     )
 
 
-    selected_check_statuses = (
+    selected_check_status = (
         st.multiselect(
-            "Statut des contrôles",
+            "Filtrer par statut de contrôle",
             options=check_statuses,
             default=check_statuses,
         )
     )
 
 
-    filtered_checks_df = (
-        checks_df.copy()
-    )
-
-
-    if selected_check_statuses:
-
-        filtered_checks_df = (
-            filtered_checks_df[
-                filtered_checks_df[
-                    "status"
-                ].isin(
-                    selected_check_statuses
-                )
-            ]
+    filtered_checks = [
+        check
+        for check
+        in checks
+        if str(
+            check.get(
+                "status",
+                "UNKNOWN",
+            )
         )
+        in selected_check_status
+    ]
 
 
     st.dataframe(
-        filtered_checks_df,
+        pd.DataFrame(
+            filtered_checks
+        ),
         use_container_width=True,
         hide_index=True,
     )
 
 
+else:
+
+    st.info(
+        "Aucun contrôle enregistré."
+    )
+
+
 # ============================================================
-# RÉSULTATS DE SÉCURITÉ
+# FINDINGS
 # ============================================================
 
-st.divider()
 
 st.subheader(
     "Résultats de sécurité"
 )
 
 
-if not findings:
-
-    st.info(
-        "Aucune vulnérabilité détectée par les "
-        "contrôles exécutés. Ce résultat ne garantit "
-        "pas l'absence de vulnérabilités."
-    )
-
-else:
-
-    findings_df = (
-        pd.DataFrame(
-            findings
-        )
-    )
-
-
-    # ========================================================
-    # FILTRES
-    # ========================================================
-
-    f1, f2, f3 = (
-        st.columns(3)
-    )
-
+if findings:
 
     classifications = sorted(
-        findings_df.get(
-            "classification",
-            pd.Series(
-                dtype=str
-            ),
-        )
-        .dropna()
-        .astype(str)
-        .unique()
-        .tolist()
+        {
+            str(
+                finding.get(
+                    "classification",
+                    "UNKNOWN",
+                )
+            )
+            for finding
+            in findings
+        }
     )
 
 
     severities = sorted(
-        findings_df.get(
-            "severity",
-            pd.Series(
-                dtype=str
-            ),
-        )
-        .dropna()
-        .astype(str)
-        .unique()
-        .tolist()
+        {
+            str(
+                finding.get(
+                    "severity",
+                    "UNKNOWN",
+                )
+            )
+            for finding
+            in findings
+        }
     )
 
 
     confidences = sorted(
-        findings_df.get(
-            "confidence",
-            pd.Series(
-                dtype=str
-            ),
-        )
-        .dropna()
-        .astype(str)
-        .unique()
-        .tolist()
+        {
+            str(
+                finding.get(
+                    "confidence",
+                    "UNKNOWN",
+                )
+            )
+            for finding
+            in findings
+        }
     )
 
 
-    with f1:
+    filter_col1, filter_col2, filter_col3 = (
+        st.columns(
+            3
+        )
+    )
+
+
+    with filter_col1:
 
         selected_classifications = (
             st.multiselect(
                 "Classification",
-                options=classifications,
+                classifications,
                 default=classifications,
             )
         )
 
 
-    with f2:
+    with filter_col2:
 
         selected_severities = (
             st.multiselect(
                 "Sévérité",
-                options=severities,
+                severities,
                 default=severities,
             )
         )
 
 
-    with f3:
+    with filter_col3:
 
         selected_confidences = (
             st.multiselect(
                 "Confiance",
-                options=confidences,
+                confidences,
                 default=confidences,
             )
         )
 
 
-    filtered_findings = (
-        findings_df.copy()
-    )
-
-
-    if (
-        selected_classifications
-        and "classification"
-        in filtered_findings.columns
-    ):
-
-        filtered_findings = (
-            filtered_findings[
-                filtered_findings[
-                    "classification"
-                ].isin(
-                    selected_classifications
-                )
-            ]
+    filtered_findings = [
+        finding
+        for finding
+        in findings
+        if str(
+            finding.get(
+                "classification",
+                "UNKNOWN",
+            )
         )
+        in selected_classifications
 
-
-    if (
-        selected_severities
-        and "severity"
-        in filtered_findings.columns
-    ):
-
-        filtered_findings = (
-            filtered_findings[
-                filtered_findings[
-                    "severity"
-                ].isin(
-                    selected_severities
-                )
-            ]
+        and str(
+            finding.get(
+                "severity",
+                "UNKNOWN",
+            )
         )
+        in selected_severities
 
-
-    if (
-        selected_confidences
-        and "confidence"
-        in filtered_findings.columns
-    ):
-
-        filtered_findings = (
-            filtered_findings[
-                filtered_findings[
-                    "confidence"
-                ].isin(
-                    selected_confidences
-                )
-            ]
+        and str(
+            finding.get(
+                "confidence",
+                "UNKNOWN",
+            )
         )
-
-
-    # ========================================================
-    # TABLEAU
-    # ========================================================
-
-    display_columns = [
-        column
-        for column in [
-            "event_type",
-            "classification",
-            "severity",
-            "confidence",
-            "target",
-            "parameter",
-            "message",
-            "evidence",
-            "recommendation",
-            "validation_method",
-        ]
-        if column
-        in filtered_findings.columns
+        in selected_confidences
     ]
 
 
+    table_rows = []
+
+
+    for finding in filtered_findings:
+
+        table_rows.append(
+            {
+                "Type": finding.get(
+                    "event_type"
+                ),
+
+                "Classification": (
+                    finding.get(
+                        "classification"
+                    )
+                ),
+
+                "Sévérité": finding.get(
+                    "severity"
+                ),
+
+                "Confiance": finding.get(
+                    "confidence"
+                ),
+
+                "URL": (
+                    finding.get(
+                        "url"
+                    )
+                    or finding.get(
+                        "target"
+                    )
+                ),
+
+                "Paramètre": finding.get(
+                    "parameter"
+                ),
+
+                "Message": finding.get(
+                    "message"
+                ),
+            }
+        )
+
+
     st.dataframe(
-        filtered_findings[
-            display_columns
-        ],
+        pd.DataFrame(
+            table_rows
+        ),
         use_container_width=True,
         hide_index=True,
     )
 
 
     # ========================================================
-    # DÉTAIL D'UN FINDING
+    # DÉTAILS
     # ========================================================
 
-    st.subheader(
-        "Détail des résultats"
+    st.markdown(
+        "#### Détails"
     )
 
 
     for index, finding in enumerate(
-        filtered_findings.to_dict(
-            orient="records"
-        ),
+        filtered_findings,
         start=1,
     ):
 
         event_type = finding.get(
             "event_type",
-            "RESULT",
+            "Finding",
         )
 
-        severity = finding.get(
-            "severity",
-            "-",
+
+        target = (
+            finding.get(
+                "url"
+            )
+            or finding.get(
+                "target"
+            )
+            or "Cible inconnue"
         )
 
 
@@ -908,144 +1037,126 @@ else:
             (
                 f"{index}. "
                 f"{event_type} - "
-                f"{severity}"
+                f"{target}"
             )
         ):
 
             st.write(
                 "Classification :",
                 finding.get(
-                    "classification",
-                    "-",
+                    "classification"
                 ),
             )
 
+
             st.write(
                 "Sévérité :",
-                severity,
+                finding.get(
+                    "severity"
+                ),
             )
+
 
             st.write(
                 "Confiance :",
                 finding.get(
-                    "confidence",
-                    "-",
+                    "confidence"
                 ),
             )
-
-            st.write(
-                "URL :",
-                finding.get(
-                    "url",
-                    finding.get(
-                        "target",
-                        "-",
-                    ),
-                ),
-            )
-
-
-            parameter = finding.get(
-                "parameter"
-            )
-
-            if (
-                parameter
-                and str(
-                    parameter
-                ).lower()
-                != "nan"
-            ):
-
-                st.write(
-                    "Paramètre :",
-                    parameter,
-                )
 
 
             st.write(
-                "Observation :",
+                "Message :",
                 finding.get(
-                    "message",
-                    "-",
+                    "message"
                 ),
             )
+
+
+            st.write(
+                "Évidence :",
+                finding.get(
+                    "evidence"
+                ),
+            )
+
 
             st.write(
                 "Risque :",
                 finding.get(
-                    "description",
-                    "-",
+                    "risk"
                 ),
             )
 
 
-            evidence = finding.get(
-                "evidence"
-            )
-
-            if (
-                evidence
-                and str(
-                    evidence
-                ).lower()
-                != "nan"
-            ):
-
-                st.write(
-                    "Preuve :",
-                    evidence,
-                )
-
-
-            recommendation = (
+            st.write(
+                "Recommandation :",
                 finding.get(
                     "recommendation"
-                )
+                ),
             )
 
-            if (
-                recommendation
-                and str(
-                    recommendation
-                ).lower()
-                != "nan"
-            ):
 
-                st.write(
-                    "Recommandation :",
-                    recommendation,
-                )
-
-
-            validation_method = (
+            st.write(
+                "Validation :",
                 finding.get(
                     "validation_method"
-                )
+                ),
             )
 
-            if (
-                validation_method
-                and str(
-                    validation_method
-                ).lower()
-                != "nan"
-            ):
 
-                st.write(
-                    "Méthode de validation :",
-                    validation_method,
-                )
+else:
+
+    st.success(
+        (
+            "Aucune vulnérabilité détectée par les "
+            "contrôles exécutés. Ce résultat ne garantit "
+            "pas l’absence de vulnérabilités."
+        )
+    )
+
+
+# ============================================================
+# ERREURS
+# ============================================================
+
+
+st.subheader(
+    "Erreurs et analyses incomplètes"
+)
+
+
+errors = report.get(
+    "errors",
+    [],
+)
+
+
+if errors:
+
+    st.dataframe(
+        pd.DataFrame(
+            errors
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+else:
+
+    st.info(
+        "Aucune erreur de collecte."
+    )
 
 
 # ============================================================
 # LIMITATIONS
 # ============================================================
 
-st.divider()
 
 st.subheader(
-    "Limites de l'audit"
+    "Limites de l'analyse"
 )
 
 
@@ -1055,26 +1166,17 @@ limitations = report.get(
 )
 
 
-if limitations:
+for limitation in limitations:
 
-    for limitation in limitations:
-
-        st.write(
-            f"- {limitation}"
-        )
-
-else:
-
-    st.info(
-        "Aucune limitation déclarée."
+    st.write(
+        f"- {limitation}"
     )
 
 
 # ============================================================
-# EXPORT JSON
+# EXPORT
 # ============================================================
 
-st.divider()
 
 st.subheader(
     "Export"
@@ -1083,8 +1185,8 @@ st.subheader(
 
 json_data = json.dumps(
     report,
-    ensure_ascii=False,
     indent=2,
+    ensure_ascii=False,
     default=str,
 )
 
@@ -1092,34 +1194,28 @@ json_data = json.dumps(
 st.download_button(
     label="Exporter le rapport JSON",
     data=json_data,
-    file_name=(
-        "web_audit_report.json"
-    ),
+    file_name="web_audit_report.json",
     mime="application/json",
 )
 
 
-# ============================================================
-# EXPORT CSV
-# ============================================================
-
 if findings:
 
+    findings_df = pd.DataFrame(
+        findings
+    )
+
+
     csv_data = (
-        pd.DataFrame(
-            findings
-        )
-        .to_csv(
+        findings_df.to_csv(
             index=False
         )
     )
 
 
     st.download_button(
-        label="Exporter les résultats CSV",
+        label="Exporter les findings CSV",
         data=csv_data,
-        file_name=(
-            "web_audit_findings.csv"
-        ),
+        file_name="web_audit_findings.csv",
         mime="text/csv",
     )
