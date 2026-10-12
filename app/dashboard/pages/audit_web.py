@@ -449,6 +449,97 @@ with crawl_col4:
     )
 
 
+st.subheader(
+    "Synthèse des findings"
+)
+
+
+finding_summary = report.get(
+    "finding_summary",
+    [],
+)
+
+
+if finding_summary:
+
+    summary_rows = []
+
+
+    for item in finding_summary:
+
+        summary_rows.append(
+            {
+                "Type": (
+                    item.get(
+                        "event_type"
+                    )
+                ),
+
+                "Classification": (
+                    item.get(
+                        "classification"
+                    )
+                ),
+
+                "Sévérité": (
+                    item.get(
+                        "severity"
+                    )
+                ),
+
+                "Confiance": (
+                    item.get(
+                        "confidence"
+                    )
+                ),
+
+                "Occurrences": (
+                    item.get(
+                        "occurrence_count",
+                        0,
+                    )
+                ),
+
+                "Pages concernées": (
+                    item.get(
+                        "affected_page_count",
+                        0,
+                    )
+                ),
+
+                "Pages analysées": (
+                    item.get(
+                        "total_pages",
+                        0,
+                    )
+                ),
+
+                "Couverture (%)": (
+                    item.get(
+                        "coverage_percentage",
+                        0,
+                    )
+                ),
+            }
+        )
+
+
+    st.dataframe(
+        pd.DataFrame(
+            summary_rows
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+else:
+
+    st.info(
+        "Aucune synthèse disponible."
+    )
+
+
 # ============================================================
 # RÉSUMÉ
 # ============================================================

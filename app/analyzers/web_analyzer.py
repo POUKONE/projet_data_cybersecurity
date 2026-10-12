@@ -84,6 +84,7 @@ def create_empty_report(
 
         "checks": [],
         "findings": [],
+        "finding_summary": [],
 
         # Compatibilité avec les anciennes parties
         # du projet.
@@ -500,6 +501,247 @@ def analyze_page(
             }
         )
 
+
+def aggregate_web_findings(
+    findings: list[dict],
+    total_pages: int = 0,
+) -> list[dict]:
+    """
+    Agrège les findings Web par type d'événement.
+
+    Le détail page par page reste conservé dans
+    report["findings"].
+
+    Cette fonction produit uniquement une synthèse.
+    """
+
+    grouped = {}
+
+
+    for finding in findings:
+
+        event_type = (
+            finding.get(
+                "event_type"
+            )
+            or "UNKNOWN"
+        )
+
+
+        if event_type not in grouped:
+
+            grouped[event_type] = {
+                "event_type": event_type,
+
+                "classification": (
+                    finding.get(
+                        "classification"
+                    )
+                ),
+
+                "severity": (
+                    finding.get(
+                        "severity"
+                    )
+                ),
+
+                "confidence": (
+                    finding.get(
+                        "confidence"
+                    )
+                ),
+
+                "message": (
+                    finding.get(
+                        "message"
+                    )
+                ),
+
+                "recommendation": (
+                    finding.get(
+                        "recommendation"
+                    )
+                ),
+
+                "validation_method": (
+                    finding.get(
+                        "validation_method"
+                    )
+                ),
+
+                "affected_urls": set(),
+
+                "parameters": set(),
+
+                "occurrence_count": 0,
+            }
+
+
+        item = grouped[
+            event_type
+        ]
+
+
+        item[
+            "occurrence_count"
+        ] += 1
+
+
+        target_url = (
+            finding.get(
+                "url"
+            )
+            or finding.get(
+                "target"
+            )
+        )
+
+
+        if target_url:
+
+            item[
+                "affected_urls"
+            ].add(
+                target_url
+            )
+
+
+        parameter = finding.get(
+            "parameter"
+        )
+
+
+        if parameter:
+
+            item[
+                "parameters"
+            ].add(
+                str(
+                    parameter
+                )
+            )
+
+
+    summary = []
+
+
+    for item in grouped.values():
+
+        affected_urls = sorted(
+            item[
+                "affected_urls"
+            ]
+        )
+
+
+        affected_page_count = len(
+            affected_urls
+        )
+
+
+        coverage_percentage = 0.0
+
+
+        if total_pages > 0:
+
+            coverage_percentage = round(
+                (
+                    affected_page_count
+                    / total_pages
+                )
+                * 100,
+                2,
+            )
+
+
+        summary.append(
+            {
+                "event_type": (
+                    item[
+                        "event_type"
+                    ]
+                ),
+
+                "classification": (
+                    item[
+                        "classification"
+                    ]
+                ),
+
+                "severity": (
+                    item[
+                        "severity"
+                    ]
+                ),
+
+                "confidence": (
+                    item[
+                        "confidence"
+                    ]
+                ),
+
+                "occurrence_count": (
+                    item[
+                        "occurrence_count"
+                    ]
+                ),
+
+                "affected_page_count": (
+                    affected_page_count
+                ),
+
+                "total_pages": (
+                    total_pages
+                ),
+
+                "coverage_percentage": (
+                    coverage_percentage
+                ),
+
+                "affected_urls": (
+                    affected_urls
+                ),
+
+                "parameters": sorted(
+                    item[
+                        "parameters"
+                    ]
+                ),
+
+                "message": (
+                    item[
+                        "message"
+                    ]
+                ),
+
+                "recommendation": (
+                    item[
+                        "recommendation"
+                    ]
+                ),
+
+                "validation_method": (
+                    item[
+                        "validation_method"
+                    ]
+                ),
+            }
+        )
+
+
+    summary.sort(
+        key=lambda item: (
+            -item[
+                "affected_page_count"
+            ],
+            item[
+                "event_type"
+            ],
+        )
+    )
+
+
+    return summary
 
 # ============================================================
 # ANALYSE PRINCIPALE
@@ -1057,6 +1299,14 @@ def analyze_web_security(
     report["finding_count"] = len(
         report["findings"]
     )
+
+    report["finding_summary"] = aggregate_web_findings(
+        findings=report["findings"],
+        total_pages=len(
+            report["pages"]
+        ),
+    )
+      
 
 
     update_coverage(
