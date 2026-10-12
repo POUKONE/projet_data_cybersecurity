@@ -90,38 +90,100 @@ def test_launch_network_scan(
 def test_launch_web_audit(
     mock_run_web
 ):
-    """
-    Vérifie le lancement d'un audit Web
-    sans envoyer de vraie requête HTTP.
-    """
 
-    mock_run_web.return_value = [
-        {
-            "event_type": "CSP_MISSING",
-            "url": "https://example.com",
-            "risk_score": 15,
-            "risk_level": "LOW"
-        }
-    ]
+    mock_run_web.return_value = {
+        "audit_status": "COMPLETED",
+
+        "requested_url": (
+            "https://example.com"
+        ),
+
+        "final_url": (
+            "https://example.com"
+        ),
+
+        "http_status": 200,
+
+        "redirects": [],
+
+        "request_count": 1,
+
+        "coverage": {
+            "executed": 6,
+            "passed": 5,
+            "failed": 1,
+            "skipped": 0,
+            "indeterminate": 0,
+        },
+
+        "checks": [],
+
+        "detections": [
+            {
+                "event_type": (
+                    "CSP_MISSING"
+                )
+            }
+        ],
+
+        "alerts": [
+            {
+                "event_type": (
+                    "CSP_MISSING"
+                ),
+
+                "risk_score": 15,
+            }
+        ],
+
+        "finding_count": 1,
+
+        "alert_count": 1,
+
+        "errors": [],
+    }
+
 
     response = client.post(
         "/web/audit",
         json={
-            "url": "https://example.com"
+            "url": (
+                "https://example.com"
+            )
         }
     )
 
-    assert response.status_code == 200
+
+    assert (
+        response.status_code
+        == 200
+    )
+
 
     data = response.json()
 
-    assert data["url"] == "https://example.com"
-    assert data["alert_count"] == 1
+
+    assert (
+        data["audit_status"]
+        == "COMPLETED"
+    )
+
+    assert (
+        data["finding_count"]
+        == 1
+    )
+
+    assert (
+        data["coverage"][
+            "executed"
+        ]
+        == 6
+    )
+
 
     mock_run_web.assert_called_once_with(
         "https://example.com"
     )
-
 
 
 

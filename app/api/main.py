@@ -220,32 +220,27 @@ def launch_web_audit(
     request: WebAuditRequest
 ):
     """
-    Lance un audit de sécurité Web.
+    Lance un audit Web passif.
 
-    Vérifications actuelles :
-    - HTTPS ;
-    - CSP ;
-    - HSTS ;
-    - X-Content-Type-Options ;
-    - X-Frame-Options ;
-    - Referrer-Policy.
+    Une erreur d'analyse est renvoyée
+    dans le rapport et n'est jamais
+    interprétée comme zéro vulnérabilité.
     """
 
     try:
 
-        alerts = run_web_analysis(
+        report = run_web_analysis(
             request.url
         )
 
-        return {
-            "url": request.url,
-            "alert_count": len(alerts),
-            "alerts": alerts
-        }
+        return report
 
     except Exception as error:
 
         raise HTTPException(
             status_code=500,
-            detail=str(error)
+            detail=(
+                "Erreur interne pendant "
+                f"l'audit Web : {error}"
+            )
         )
