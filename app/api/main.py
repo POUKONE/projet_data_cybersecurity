@@ -13,7 +13,10 @@ Cette API permet notamment :
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import (
+    BaseModel,
+    Field,
+)
 
 from app.database.db import (
     initialize_database,
@@ -75,13 +78,38 @@ class NetworkScanRequest(BaseModel):
     target: str
 
 
-class WebAuditRequest(BaseModel):
+class WebAuditRequest(
+    BaseModel
+):
     """
-    Requête utilisée pour lancer
-    un audit Web.
+    Paramètres d'un audit Web passif.
     """
 
     url: str
+
+    max_depth: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+    )
+
+    max_pages: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+    )
+
+    max_duration_seconds: int = Field(
+        default=30,
+        ge=5,
+        le=120,
+    )
+
+    delay_seconds: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=5.0,
+    )
 
 
 # ============================================================
@@ -215,32 +243,34 @@ def launch_network_scan(
 # AUDIT WEB
 # ============================================================
 
-@app.post("/web/audit")
+
+@app.post(
+    "/web/audit"
+)
 def launch_web_audit(
-    request: WebAuditRequest
+    request: WebAuditRequest,
 ):
     """
-    Lance un audit Web passif.
-
-    Une erreur d'analyse est renvoyée
-    dans le rapport et n'est jamais
-    interprétée comme zéro vulnérabilité.
+    Lance un audit Web passif
+    avec des limites contrôlées.
     """
 
-    try:
+    return run_web_analysis(
+        url=request.url,
 
-        report = run_web_analysis(
-            request.url
-        )
+        max_depth=(
+            request.max_depth
+        ),
 
-        return report
+        max_pages=(
+            request.max_pages
+        ),
 
-    except Exception as error:
+        max_duration_seconds=(
+            request.max_duration_seconds
+        ),
 
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Erreur interne pendant "
-                f"l'audit Web : {error}"
-            )
-        )
+        delay_seconds=(
+            request.delay_seconds
+        ),
+    )

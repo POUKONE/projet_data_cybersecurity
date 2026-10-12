@@ -83,6 +83,68 @@ launch_audit = st.button(
 )
 
 
+st.subheader(
+    "Paramètres de l'exploration"
+)
+
+
+col1, col2 = st.columns(
+    2
+)
+
+
+with col1:
+
+    max_depth = st.number_input(
+        "Profondeur maximale",
+        min_value=0,
+        max_value=5,
+        value=2,
+        step=1,
+    )
+
+
+with col2:
+
+    max_pages = st.number_input(
+        "Nombre maximal de pages",
+        min_value=1,
+        max_value=100,
+        value=20,
+        step=1,
+    )
+
+
+col3, col4 = st.columns(
+    2
+)
+
+
+with col3:
+
+    max_duration_seconds = (
+        st.number_input(
+            "Durée maximale du crawl (secondes)",
+            min_value=5,
+            max_value=120,
+            value=30,
+            step=5,
+        )
+    )
+
+
+with col4:
+
+    delay_seconds = (
+        st.number_input(
+            "Délai entre les requêtes (secondes)",
+            min_value=0.0,
+            max_value=5.0,
+            value=0.2,
+            step=0.1,
+        )
+    )
+
 # ============================================================
 # EXÉCUTION
 # ============================================================
@@ -104,9 +166,20 @@ if launch_audit:
                 "Audit en cours..."
             ):
 
-                report = run_web_audit(
-                    url.strip()
+                report = run_web_audit
+                (
+                    url=url.strip(),
+
+                    max_depth=int(max_depth),
+
+                    max_pages=int(max_pages),
+
+                    max_duration_seconds=int(max_duration_seconds
+                    ),
+
+                    delay_seconds=float(delay_seconds),
                 )
+            
 
 
             st.session_state[

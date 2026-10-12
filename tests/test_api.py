@@ -1,7 +1,7 @@
 import pytest
 
 from fastapi.testclient import TestClient
-
+from unittest.mock import patch
 import app.database.db as db_module
 
 from app.api.main import app
@@ -182,7 +182,11 @@ def test_launch_web_audit(
 
 
     mock_run_web.assert_called_once_with(
-        "https://example.com"
+        url="https://example.com",
+        max_depth=2,
+        max_pages=20,
+        max_duration_seconds=30,
+        delay_seconds=0.2,
     )
 
 
@@ -305,4 +309,81 @@ def test_events_endpoint():
     assert isinstance(
         data["events"],
         list
+    )
+
+@patch(
+    "app.api.main.run_web_analysis"
+)
+def test_web_audit_forwards_crawl_parameters(
+    mock_run_web_analysis,
+):
+    """
+    Vérifie que l'API transmet correctement
+    les paramètres du crawler à l'analyseur Web.
+    """
+
+    mock_run_web_analysis.return_value = {
+        "audit_status": "COMPLETED",
+        "mode": "PASSIVE",
+        "pages": [],
+        "findings": [],
+        "alerts": [],
+    }
+
+
+    response = client.post(
+        "/web/audit",
+        json={
+            "url": (
+                "https://example.com"
+            ),
+            "max_depth": 3,
+            "max_pages": 15,
+            "max_duration_seconds": 45,
+            "delay_seconds": 0.5,
+        },
+    )
+
+
+    assert (
+        response.status_code
+        == 200
+    )
+
+
+    mock_run_web_analysis.assert_called_once_with(
+        url="https://example.com",
+        max_depth=3,
+        max_pages=15,
+        max_duration_seconds=45,
+        delay_seconds=0.5,
+    )
+
+def test_web_audit_rejects_invalid_crawl_limits():
+    """
+    Vérifie que FastAPI/Pydantic refuse
+    des limites dangereuses ou incohérentes.
+    """
+
+    response = client.post(
+        "/web/audit",
+        json={
+            "url": (
+                "https://example.com"
+            ),
+
+            "max_depth": 100,
+
+            "max_pages": 10000,
+
+            "max_duration_seconds": 5000,
+
+            "delay_seconds": -1,
+        },
+    )
+
+
+    assert (
+        response.status_code
+        == 422
     )

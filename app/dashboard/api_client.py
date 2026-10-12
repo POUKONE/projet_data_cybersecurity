@@ -109,30 +109,39 @@ def run_network_scan(
 
     return response.json()
 
-
 def run_web_audit(
-    url: str
+    url: str,
+    max_depth: int = 2,
+    max_pages: int = 20,
+    max_duration_seconds: int = 30,
+    delay_seconds: float = 0.2,
 ) -> dict:
     """
-    Lance un audit Web passif.
-
-    Le rapport complet est retourné :
-    - statut ;
-    - couverture ;
-    - contrôles ;
-    - erreurs ;
-    - détections ;
-    - alertes.
+    Lance un audit Web passif via l'API FastAPI.
     """
 
+    payload = {
+        "url": url,
+        "max_depth": max_depth,
+        "max_pages": max_pages,
+        "max_duration_seconds": (
+            max_duration_seconds
+        ),
+        "delay_seconds": delay_seconds,
+    }
+
+
     response = requests.post(
-        f"{API_URL}/web/audit",
-        json={
-            "url": url
-        },
-        timeout=30
+        f"{API_BASE_URL}/web/audit",
+        json=payload,
+        timeout=(
+            max_duration_seconds
+            + 20
+        ),
     )
 
+
     response.raise_for_status()
+
 
     return response.json()
