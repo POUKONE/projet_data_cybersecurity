@@ -117,7 +117,7 @@ def test_passive_web_audit_integration(
         result["pages"][0][
             "url"
         ]
-        == "http://example.com"
+        == "http://example.com/"
     )
 
     assert (

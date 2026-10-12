@@ -508,7 +508,7 @@ def test_redirect_is_recorded(
 
     assert (
         report["final_url"]
-        == "https://example.com"
+        == "https://example.com/"
     )
 
 
