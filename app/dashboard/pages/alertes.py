@@ -1,17 +1,23 @@
 import pandas as pd
-import requests
 import streamlit as st
 
 from api_client import get_alerts
 
 
-st.title("Alertes")
+# ============================================================
+# PAGE
+# ============================================================
 
-st.markdown(
-    """
-    Consultation et classification des observations
-    de sécurité détectées par les différents modules.
-    """
+
+st.title(
+    "Alertes de sécurité"
+)
+
+st.caption(
+    (
+        "Consultation, filtrage et analyse "
+        "des alertes générées par la plateforme."
+    )
 )
 
 
@@ -19,17 +25,49 @@ st.markdown(
 # CHARGEMENT DES DONNÉES
 # ============================================================
 
+
 try:
 
     alerts = get_alerts()
 
-except requests.RequestException as error:
+except Exception as error:
 
     st.error(
-        f"Impossible de récupérer les alertes : {error}"
+        (
+            "Impossible de récupérer les alertes : "
+            f"{error}"
+        )
     )
 
     st.stop()
+
+
+# ============================================================
+# VALIDATION
+# ============================================================
+
+
+if alerts is None:
+
+    alerts = []
+
+
+if isinstance(
+    alerts,
+    dict,
+):
+
+    if "alerts" in alerts:
+
+        alerts = alerts[
+            "alerts"
+        ]
+
+    else:
+
+        alerts = [
+            alerts
+        ]
 
 
 if not alerts:
@@ -41,715 +79,1060 @@ if not alerts:
     st.stop()
 
 
+# ============================================================
+# DATAFRAME
+# ============================================================
+
+
 df = pd.DataFrame(
     alerts
 )
 
 
-# ============================================================
-# NORMALISATION
-# ============================================================
+if df.empty:
 
-if "created_at" in df.columns:
-
-    df["created_at"] = pd.to_datetime(
-        df["created_at"],
-        errors="coerce"
+    st.info(
+        "Aucune alerte disponible."
     )
 
+    st.stop()
 
-for column in [
+
+# ============================================================
+# NORMALISATION DES COLONNES
+# ============================================================
+
+
+expected_columns = [
+    "id",
+    "event_type",
     "source_type",
+    "risk_score",
+    "risk_level",
     "target",
     "ip_address",
     "host",
     "url",
-    "event_type",
-    "risk_level",
+    "message",
+    "description",
     "status",
-]:
+    "classification",
+    "severity",
+    "confidence",
+    "created_at",
+]
+
+
+for column in expected_columns:
 
     if column not in df.columns:
-        df[column] = None
+
+        df[
+            column
+        ] = None
 
 
 # ============================================================
-# TITRE DE LA ZONE DE FILTRES
+# SCORE
 # ============================================================
 
-st.subheader(
-    "Classification des observations"
-)
 
-
-# ============================================================
-# PREMIÈRE LIGNE DE FILTRES
-# ============================================================
-
-col1, col2, col3 = st.columns(3)
-
-
-# ------------------------------------------------------------
-# SOURCE
-# ------------------------------------------------------------
-
-with col1:
-
-    sources = sorted(
-        df["source_type"]
-        .dropna()
-        .unique()
-        .tolist()
-    )
-
-    selected_sources = st.multiselect(
-        "Source",
-        sources
-    )
-
-
-# ------------------------------------------------------------
-# NIVEAU DE RISQUE
-# ------------------------------------------------------------
-
-with col2:
-
-    risk_levels = sorted(
-        df["risk_level"]
-        .dropna()
-        .unique()
-        .tolist()
-    )
-
-    selected_risks = st.multiselect(
-        "Niveau de risque",
-        risk_levels
-    )
-
-
-# ------------------------------------------------------------
-# STATUT
-# ------------------------------------------------------------
-
-with col3:
-
-    statuses = sorted(
-        df["status"]
-        .dropna()
-        .unique()
-        .tolist()
-    )
-
-    selected_statuses = st.multiselect(
-        "Statut",
-        statuses
-    )
-
-
-# ============================================================
-# DEUXIÈME LIGNE DE FILTRES
-# ============================================================
-
-col4, col5, col6 = st.columns(3)
-
-
-# ------------------------------------------------------------
-# CIBLE
-# ------------------------------------------------------------
-
-with col4:
-
-    targets = sorted(
-        df["target"]
-        .dropna()
-        .unique()
-        .tolist()
-    )
-
-    selected_targets = st.multiselect(
-        "Cible",
-        targets
-    )
-
-
-# ------------------------------------------------------------
-# ADRESSE IP
-# ------------------------------------------------------------
-
-with col5:
-
-    ip_addresses = sorted(
-        df["ip_address"]
-        .dropna()
-        .unique()
-        .tolist()
-    )
-
-    selected_ips = st.multiselect(
-        "Adresse IP",
-        ip_addresses
-    )
-
-
-# ------------------------------------------------------------
-# TYPE D'OBSERVATION
-# ------------------------------------------------------------
-
-with col6:
-
-    event_types = sorted(
-        df["event_type"]
-        .dropna()
-        .unique()
-        .tolist()
-    )
-
-    selected_events = st.multiselect(
-        "Type d'observation",
-        event_types
-    )
-
-
-# ============================================================
-# FILTRAGE
-# ============================================================
-
-filtered_df = df.copy()
-
-
-if selected_sources:
-
-    filtered_df = filtered_df[
-        filtered_df[
-            "source_type"
-        ].isin(
-            selected_sources
-        )
-    ]
-
-
-if selected_risks:
-
-    filtered_df = filtered_df[
-        filtered_df[
-            "risk_level"
-        ].isin(
-            selected_risks
-        )
-    ]
-
-
-if selected_statuses:
-
-    filtered_df = filtered_df[
-        filtered_df[
-            "status"
-        ].isin(
-            selected_statuses
-        )
-    ]
-
-
-if selected_targets:
-
-    filtered_df = filtered_df[
-        filtered_df[
-            "target"
-        ].isin(
-            selected_targets
-        )
-    ]
-
-
-if selected_ips:
-
-    filtered_df = filtered_df[
-        filtered_df[
-            "ip_address"
-        ].isin(
-            selected_ips
-        )
-    ]
-
-
-if selected_events:
-
-    filtered_df = filtered_df[
-        filtered_df[
-            "event_type"
-        ].isin(
-            selected_events
-        )
-    ]
-
-
-# ============================================================
-# KPI
-# ============================================================
-
-st.divider()
-
-total = len(
-    filtered_df
-)
-
-critical = (
-    filtered_df[
-        filtered_df["risk_level"]
-        == "CRITICAL"
-    ].shape[0]
-)
-
-high = (
-    filtered_df[
-        filtered_df["risk_level"]
-        == "HIGH"
-    ].shape[0]
-)
-
-open_alerts = (
-    filtered_df[
-        filtered_df["status"]
-        == "OPEN"
-    ].shape[0]
-)
-
-
-score = pd.to_numeric(
-    filtered_df.get(
+df[
+    "risk_score"
+] = pd.to_numeric(
+    df[
         "risk_score"
-    ),
-    errors="coerce"
+    ],
+    errors="coerce",
 )
 
 
-average_score = (
-    round(
-        score.mean(),
-        1
+# ============================================================
+# NORMALISATION TEXTE
+# ============================================================
+
+
+text_columns = [
+    "event_type",
+    "source_type",
+    "risk_level",
+    "status",
+    "classification",
+    "severity",
+    "confidence",
+]
+
+
+for column in text_columns:
+
+    df[
+        column
+    ] = (
+        df[
+            column
+        ]
+        .fillna(
+            "UNKNOWN"
+        )
+        .astype(
+            str
+        )
     )
-    if not score.empty
-    else 0
-)
 
 
-kpi1, kpi2, kpi3, kpi4, kpi5 = (
-    st.columns(5)
-)
+# ============================================================
+# CIBLE UNIFIÉE
+# ============================================================
 
 
-kpi1.metric(
-    "Observations",
-    total
-)
+def resolve_target(
+    row,
+):
+    """
+    Détermine la cible principale d'une alerte.
+    """
 
-kpi2.metric(
-    "Critiques",
-    critical
-)
+    candidates = [
+        row.get(
+            "target"
+        ),
+        row.get(
+            "url"
+        ),
+        row.get(
+            "host"
+        ),
+        row.get(
+            "ip_address"
+        ),
+    ]
 
-kpi3.metric(
-    "Élevées",
-    high
-)
 
-kpi4.metric(
-    "Ouvertes",
-    open_alerts
-)
+    for value in candidates:
 
-kpi5.metric(
-    "Score moyen",
-    average_score
+        if (
+            value is not None
+            and not pd.isna(
+                value
+            )
+            and str(
+                value
+            ).strip()
+        ):
+
+            return str(
+                value
+            )
+
+
+    return (
+        "Cible inconnue"
+    )
+
+
+df[
+    "display_target"
+] = df.apply(
+    resolve_target,
+    axis=1,
 )
 
 
 # ============================================================
-# VUE PAR CIBLE
+# EN-TÊTE KPI
 # ============================================================
 
-st.divider()
 
 st.subheader(
-    "Analyse par cible"
+    "Vue d'ensemble"
+)
+
+
+total_alerts = len(
+    df
+)
+
+
+open_alerts = len(
+    df[
+        df[
+            "status"
+        ].str.upper()
+        == "OPEN"
+    ]
+)
+
+
+critical_alerts = len(
+    df[
+        df[
+            "risk_level"
+        ].str.upper()
+        == "CRITICAL"
+    ]
+)
+
+
+high_alerts = len(
+    df[
+        df[
+            "risk_level"
+        ].str.upper()
+        == "HIGH"
+    ]
+)
+
+
+kpi_col1, kpi_col2, kpi_col3, kpi_col4 = (
+    st.columns(
+        4
+    )
+)
+
+
+with kpi_col1:
+
+    st.metric(
+        "Alertes totales",
+        total_alerts,
+    )
+
+
+with kpi_col2:
+
+    st.metric(
+        "Alertes ouvertes",
+        open_alerts,
+    )
+
+
+with kpi_col3:
+
+    st.metric(
+        "Critiques",
+        critical_alerts,
+    )
+
+
+with kpi_col4:
+
+    st.metric(
+        "Élevées",
+        high_alerts,
+    )
+
+
+# ============================================================
+# SCORE GLOBAL
+# ============================================================
+
+
+st.subheader(
+    "Niveau de risque"
+)
+
+
+valid_scores = (
+    df[
+        "risk_score"
+    ]
+    .dropna()
+)
+
+
+if not valid_scores.empty:
+
+    max_score = (
+        valid_scores.max()
+    )
+
+    average_score = (
+        valid_scores.mean()
+    )
+
+
+    score_col1, score_col2 = (
+        st.columns(
+            2
+        )
+    )
+
+
+    with score_col1:
+
+        if (
+            max_score is not None
+            and not pd.isna(
+                max_score
+            )
+        ):
+
+            st.metric(
+                "Score maximal",
+                f"{float(max_score):.0f}/100",
+            )
+
+
+    with score_col2:
+
+        if (
+            average_score is not None
+            and not pd.isna(
+                average_score
+            )
+        ):
+
+            st.metric(
+                "Score moyen",
+                f"{float(average_score):.1f}/100",
+            )
+
+
+else:
+
+    st.info(
+        (
+            "Aucun score de risque "
+            "n'est disponible."
+        )
+    )
+
+
+# ============================================================
+# FILTRES
+# ============================================================
+
+
+st.subheader(
+    "Filtres"
+)
+
+
+filter_col1, filter_col2, filter_col3 = (
+    st.columns(
+        3
+    )
+)
+
+
+source_types = sorted(
+    df[
+        "source_type"
+    ]
+    .dropna()
+    .unique()
+    .tolist()
+)
+
+
+risk_levels = sorted(
+    df[
+        "risk_level"
+    ]
+    .dropna()
+    .unique()
+    .tolist()
+)
+
+
+statuses = sorted(
+    df[
+        "status"
+    ]
+    .dropna()
+    .unique()
+    .tolist()
+)
+
+
+with filter_col1:
+
+    selected_sources = (
+        st.multiselect(
+            "Source",
+            options=source_types,
+            default=source_types,
+            key=(
+                "alerts_source_filter"
+            ),
+        )
+    )
+
+
+with filter_col2:
+
+    selected_levels = (
+        st.multiselect(
+            "Niveau de risque",
+            options=risk_levels,
+            default=risk_levels,
+            key=(
+                "alerts_risk_filter"
+            ),
+        )
+    )
+
+
+with filter_col3:
+
+    selected_statuses = (
+        st.multiselect(
+            "Statut",
+            options=statuses,
+            default=statuses,
+            key=(
+                "alerts_status_filter"
+            ),
+        )
+    )
+
+
+# ============================================================
+# FILTRE PAR TYPE
+# ============================================================
+
+
+event_types = sorted(
+    df[
+        "event_type"
+    ]
+    .dropna()
+    .unique()
+    .tolist()
+)
+
+
+selected_event_types = (
+    st.multiselect(
+        "Type d'événement",
+        options=event_types,
+        default=event_types,
+        key=(
+            "alerts_event_filter"
+        ),
+    )
+)
+
+
+# ============================================================
+# FILTRE PAR CIBLE
+# ============================================================
+
+
+targets = sorted(
+    df[
+        "display_target"
+    ]
+    .dropna()
+    .unique()
+    .tolist()
+)
+
+
+selected_targets = (
+    st.multiselect(
+        "Cible",
+        options=targets,
+        default=targets,
+        key=(
+            "alerts_target_filter"
+        ),
+    )
+)
+
+
+# ============================================================
+# APPLICATION DES FILTRES
+# ============================================================
+
+
+filtered_df = df[
+    df[
+        "source_type"
+    ].isin(
+        selected_sources
+    )
+    & df[
+        "risk_level"
+    ].isin(
+        selected_levels
+    )
+    & df[
+        "status"
+    ].isin(
+        selected_statuses
+    )
+    & df[
+        "event_type"
+    ].isin(
+        selected_event_types
+    )
+    & df[
+        "display_target"
+    ].isin(
+        selected_targets
+    )
+].copy()
+
+
+# ============================================================
+# RÉSULTATS
+# ============================================================
+
+
+st.subheader(
+    "Alertes"
+)
+
+
+st.write(
+    (
+        f"{len(filtered_df)} alerte(s) "
+        "correspondent aux filtres."
+    )
 )
 
 
 if filtered_df.empty:
 
     st.info(
-        "Aucune observation ne correspond aux filtres sélectionnés."
+        (
+            "Aucune alerte ne correspond "
+            "aux filtres sélectionnés."
+        )
     )
 
 else:
 
-    # On retire les cibles absentes
-    target_df = filtered_df.dropna(
-        subset=["target"]
-    ).copy()
-
-
-    if target_df.empty:
-
-        st.info(
-            "Aucune cible identifiable dans les observations."
-        )
-
-    else:
-
-        # ----------------------------------------------------
-        # AGRÉGATION PAR CIBLE
-        # ----------------------------------------------------
-
-        target_summary = (
-            target_df
-            .groupby("target")
-            .agg(
-                observations=(
-                    "event_type",
-                    "count"
-                ),
-                score_max=(
-                    "risk_score",
-                    "max"
-                ),
-                score_moyen=(
-                    "risk_score",
-                    "mean"
-                ),
-                source=(
-                    "source_type",
-                    lambda values: ", ".join(
-                        sorted(
-                            set(
-                                values
-                                .dropna()
-                                .astype(str)
-                            )
-                        )
-                    )
-                ),
-            )
-            .reset_index()
-        )
-
-
-        target_summary[
-            "score_moyen"
-        ] = (
-            target_summary[
-                "score_moyen"
-            ]
-            .round(1)
-        )
-
-
-        # ----------------------------------------------------
-        # CALCUL DU NIVEAU MAXIMAL
-        # ----------------------------------------------------
-
-        def get_level_from_score(
-            score
-        ):
-
-            if pd.isna(score):
-                return "UNKNOWN"
-
-            if score >= 70:
-                return "CRITICAL"
-
-            if score >= 50:
-                return "HIGH"
-
-            if score >= 30:
-                return "MEDIUM"
-
-            return "LOW"
-
-
-        target_summary[
-            "niveau_max"
-        ] = (
-            target_summary[
-                "score_max"
-            ]
-            .apply(
-                get_level_from_score
-            )
-        )
-
-
-        # ----------------------------------------------------
-        # CLASSEMENT
-        # ----------------------------------------------------
-
-        target_summary = (
-            target_summary
-            .sort_values(
-                [
-                    "score_max",
-                    "observations",
-                ],
-                ascending=[
-                    False,
-                    False,
-                ],
-            )
-        )
-
-
-        st.dataframe(
-            target_summary.rename(
-                columns={
-                    "target": "Cible",
-                    "source": "Source",
-                    "observations": "Observations",
-                    "score_max": "Score maximal",
-                    "score_moyen": "Score moyen",
-                    "niveau_max": "Niveau maximal",
-                }
-            ),
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-# ============================================================
-# SÉLECTION D'UNE CIBLE
-# ============================================================
-
-st.divider()
-
-st.subheader(
-    "Détails d'une cible"
-)
-
-
-available_targets = (
-    filtered_df[
-        "target"
+    display_columns = [
+        "id",
+        "event_type",
+        "source_type",
+        "risk_score",
+        "risk_level",
+        "display_target",
+        "status",
     ]
-    .dropna()
-    .astype(str)
-    .unique()
-    .tolist()
-)
 
 
-available_targets = sorted(
-    available_targets
-)
-
-
-if not available_targets:
-
-    st.info(
-        "Aucune cible disponible."
-    )
-
-else:
-
-    selected_target = st.selectbox(
-        "Sélectionner une cible",
-        available_targets
-    )
-
-
-    selected_target_df = (
-        filtered_df[
-            filtered_df[
-                "target"
-            ].astype(str)
-            == selected_target
-        ]
-        .copy()
-    )
-
-
-    # ========================================================
-    # KPI DE LA CIBLE
-    # ========================================================
-
-    target_total = len(
-        selected_target_df
-    )
-
-
-    target_max_score = (
-        pd.to_numeric(
-            selected_target_df[
-                "risk_score"
-            ],
-            errors="coerce"
-        )
-        .max()
-    )
-
-
-    if pd.isna(
-        target_max_score
-    ):
-        target_max_score = 0
-
-
-    target_level = (
-        get_level_from_score(
-            target_max_score
-        )
-    )
-
-
-    target_sources = (
-        selected_target_df[
-            "source_type"
-        ]
-        .dropna()
-        .astype(str)
-        .unique()
-        .tolist()
-    )
-
-
-    target_ips = (
-        selected_target_df[
-            "ip_address"
-        ]
-        .dropna()
-        .astype(str)
-        .unique()
-        .tolist()
-    )
-
-
-    c1, c2, c3, c4 = (
-        st.columns(4)
-    )
-
-
-    c1.metric(
-        "Observations",
-        target_total
-    )
-
-    c2.metric(
-        "Score maximal",
-        target_max_score
-    )
-
-    c3.metric(
-        "Niveau",
-        target_level
-    )
-
-    c4.metric(
-        "Sources",
-        len(
-            target_sources
-        )
-    )
-
-
-    # ========================================================
-    # INFORMATIONS SUR LA CIBLE
-    # ========================================================
-
-    st.markdown(
-        f"**Cible :** {selected_target}"
-    )
-
-
-    if target_sources:
-
-        st.markdown(
-            "**Source(s) :** "
-            + ", ".join(
-                target_sources
-            )
-        )
-
-
-    if target_ips:
-
-        st.markdown(
-            "**Adresse(s) IP :** "
-            + ", ".join(
-                target_ips
-            )
-        )
-
-
-    # ========================================================
-    # OBSERVATIONS DE LA CIBLE
-    # ========================================================
-
-    st.subheader(
-        "Observations associées"
-    )
-
-
-    target_columns = [
+    available_columns = [
         column
-        for column in [
-            "event_type",
-            "message",
-            "risk_score",
-            "risk_level",
-            "status",
-            "created_at",
-        ]
+        for column
+        in display_columns
         if column
-        in selected_target_df.columns
+        in filtered_df.columns
     ]
+
+
+    table_df = filtered_df[
+        available_columns
+    ].copy()
+
+
+    table_df = table_df.rename(
+        columns={
+            "id": "ID",
+            "event_type": (
+                "Type"
+            ),
+            "source_type": (
+                "Source"
+            ),
+            "risk_score": (
+                "Score"
+            ),
+            "risk_level": (
+                "Niveau"
+            ),
+            "display_target": (
+                "Cible"
+            ),
+            "status": (
+                "Statut"
+            ),
+        }
+    )
 
 
     st.dataframe(
-        selected_target_df[
-            target_columns
-        ]
-        .sort_values(
-            "risk_score",
-            ascending=False
-        ),
+        table_df,
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
     )
 
 
 # ============================================================
-# TABLEAU GLOBAL
+# RÉPARTITION PAR NIVEAU
 # ============================================================
 
-st.divider()
 
 st.subheader(
-    "Toutes les observations"
+    "Répartition par niveau de risque"
 )
 
 
-display_columns = [
-    column
-    for column in [
-        "source_type",
-        "target",
-        "ip_address",
-        "host",
-        "url",
-        "event_type",
-        "message",
-        "risk_score",
-        "risk_level",
-        "status",
-        "created_at",
-    ]
-    if column
-    in filtered_df.columns
-]
+if not filtered_df.empty:
+
+    risk_distribution = (
+        filtered_df[
+            "risk_level"
+        ]
+        .value_counts()
+        .rename_axis(
+            "Niveau"
+        )
+        .reset_index(
+            name="Nombre"
+        )
+    )
 
 
-st.dataframe(
-    filtered_df[
-        display_columns
-    ],
-    use_container_width=True,
-    hide_index=True
+    st.bar_chart(
+        risk_distribution,
+        x="Niveau",
+        y="Nombre",
+    )
+
+
+# ============================================================
+# RÉPARTITION PAR SOURCE
+# ============================================================
+
+
+st.subheader(
+    "Répartition par source"
 )
+
+
+if not filtered_df.empty:
+
+    source_distribution = (
+        filtered_df[
+            "source_type"
+        ]
+        .value_counts()
+        .rename_axis(
+            "Source"
+        )
+        .reset_index(
+            name="Nombre"
+        )
+    )
+
+
+    st.bar_chart(
+        source_distribution,
+        x="Source",
+        y="Nombre",
+    )
+
+
+# ============================================================
+# DÉTAIL DES ALERTES
+# ============================================================
+
+
+st.subheader(
+    "Détail des alertes"
+)
+
+
+if filtered_df.empty:
+
+    st.info(
+        "Aucune alerte à afficher."
+    )
+
+
+else:
+
+    for _, row in filtered_df.iterrows():
+
+        alert_id = row.get(
+            "id"
+        )
+
+
+        event_type = row.get(
+            "event_type",
+            "UNKNOWN",
+        )
+
+
+        risk_level = row.get(
+            "risk_level",
+            "UNKNOWN",
+        )
+
+
+        target = row.get(
+            "display_target",
+            "Cible inconnue",
+        )
+
+
+        title = (
+            f"{event_type} - "
+            f"{risk_level} - "
+            f"{target}"
+        )
+
+
+        with st.expander(
+            title
+        ):
+
+            detail_col1, detail_col2 = (
+                st.columns(
+                    2
+                )
+            )
+
+
+            with detail_col1:
+
+                st.write(
+                    "ID :",
+                    alert_id,
+                )
+
+
+                st.write(
+                    "Source :",
+                    row.get(
+                        "source_type"
+                    ),
+                )
+
+
+                st.write(
+                    "Type :",
+                    event_type,
+                )
+
+
+                st.write(
+                    "Niveau :",
+                    risk_level,
+                )
+
+
+                score = row.get(
+                    "risk_score"
+                )
+
+
+                if (
+                    score is not None
+                    and not pd.isna(
+                        score
+                    )
+                ):
+
+                    st.write(
+                        "Score :",
+                        f"{float(score):.0f}/100",
+                    )
+
+                else:
+
+                    st.write(
+                        "Score :",
+                        "Non disponible",
+                    )
+
+
+            with detail_col2:
+
+                st.write(
+                    "Statut :",
+                    row.get(
+                        "status"
+                    ),
+                )
+
+
+                st.write(
+                    "Cible :",
+                    target,
+                )
+
+
+                if (
+                    row.get(
+                        "classification"
+                    )
+                    not in [
+                        None,
+                        "UNKNOWN",
+                    ]
+                ):
+
+                    st.write(
+                        "Classification :",
+                        row.get(
+                            "classification"
+                        ),
+                    )
+
+
+                if (
+                    row.get(
+                        "severity"
+                    )
+                    not in [
+                        None,
+                        "UNKNOWN",
+                    ]
+                ):
+
+                    st.write(
+                        "Sévérité :",
+                        row.get(
+                            "severity"
+                        ),
+                    )
+
+
+                if (
+                    row.get(
+                        "confidence"
+                    )
+                    not in [
+                        None,
+                        "UNKNOWN",
+                    ]
+                ):
+
+                    st.write(
+                        "Confiance :",
+                        row.get(
+                            "confidence"
+                        ),
+                    )
+
+
+            message = row.get(
+                "message"
+            )
+
+
+            description = row.get(
+                "description"
+            )
+
+
+            if (
+                message is not None
+                and not pd.isna(
+                    message
+                )
+                and str(
+                    message
+                ).strip()
+            ):
+
+                st.markdown(
+                    "##### Message"
+                )
+
+                st.write(
+                    message
+                )
+
+
+            if (
+                description is not None
+                and not pd.isna(
+                    description
+                )
+                and str(
+                    description
+                ).strip()
+            ):
+
+                st.markdown(
+                    "##### Description"
+                )
+
+                st.write(
+                    description
+                )
+
+
+            url_value = row.get(
+                "url"
+            )
+
+
+            if (
+                url_value is not None
+                and not pd.isna(
+                    url_value
+                )
+                and str(
+                    url_value
+                ).strip()
+            ):
+
+                st.write(
+                    "URL :",
+                    url_value,
+                )
+
+
+            ip_address = row.get(
+                "ip_address"
+            )
+
+
+            if (
+                ip_address is not None
+                and not pd.isna(
+                    ip_address
+                )
+                and str(
+                    ip_address
+                ).strip()
+            ):
+
+                st.write(
+                    "Adresse IP :",
+                    ip_address,
+                )
+
+
+            host = row.get(
+                "host"
+            )
+
+
+            if (
+                host is not None
+                and not pd.isna(
+                    host
+                )
+                and str(
+                    host
+                ).strip()
+            ):
+
+                st.write(
+                    "Hôte :",
+                    host,
+                )
+
+
+# ============================================================
+# TOP ALERTES
+# ============================================================
+
+
+st.subheader(
+    "Alertes les plus risquées"
+)
+
+
+scored_alerts = (
+    filtered_df.dropna(
+        subset=[
+            "risk_score"
+        ]
+    )
+    .sort_values(
+        by="risk_score",
+        ascending=False,
+    )
+    .head(
+        10
+    )
+)
+
+
+if scored_alerts.empty:
+
+    st.info(
+        (
+            "Aucune alerte avec un score "
+            "de risque disponible."
+        )
+    )
+
+
+else:
+
+    top_rows = scored_alerts[
+        [
+            "event_type",
+            "source_type",
+            "risk_score",
+            "risk_level",
+            "display_target",
+        ]
+    ].copy()
+
+
+    top_rows = top_rows.rename(
+        columns={
+            "event_type": (
+                "Type"
+            ),
+            "source_type": (
+                "Source"
+            ),
+            "risk_score": (
+                "Score"
+            ),
+            "risk_level": (
+                "Niveau"
+            ),
+            "display_target": (
+                "Cible"
+            ),
+        }
+    )
+
+
+    st.dataframe(
+        top_rows,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+# ============================================================
+# EXPORT
+# ============================================================
+
+
+st.subheader(
+    "Export"
+)
+
+
+if not filtered_df.empty:
+
+    export_df = filtered_df.drop(
+        columns=[
+            "display_target"
+        ],
+        errors="ignore",
+    )
+
+
+    csv_data = export_df.to_csv(
+        index=False
+    )
+
+
+    st.download_button(
+        label=(
+            "Exporter les alertes en CSV"
+        ),
+        data=csv_data,
+        file_name=(
+            "security_alerts.csv"
+        ),
+        mime="text/csv",
+        key="alerts_export_csv",
+    )
