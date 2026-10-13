@@ -150,6 +150,12 @@ def create_empty_report(
 
         "finding_count": 0,
         "alert_count": 0,
+
+        "site_risk": {
+            "score": 0,
+            "level": "LOW",
+            "contributors": [],
+        },
     }
 
 
@@ -1306,6 +1312,8 @@ def analyze_web_security(
             report["pages"]
         ),
     )
+
+    report["site_risk"] = calculate_site_risk(report.get("finding_summary", []))
       
 
 
@@ -1488,6 +1496,7 @@ def run_web_analysis(
     report["finding_count"] = len(
         findings
     )
+    
 
     report["alert_count"] = len(
         alerts
@@ -1693,3 +1702,185 @@ def aggregate_web_findings(
 
 
     return summary
+
+def calculate_site_risk(
+    finding_summary: list[dict],
+) -> dict:
+    """
+    Calcule un niveau de risque global du site
+    à partir des findings agrégés.
+
+    Un même type de finding n'est compté qu'une fois
+    afin d'éviter de gonfler artificiellement le score
+    lorsqu'il apparaît sur plusieurs pages.
+    """
+
+    total_score = 0
+
+    contributors = []
+
+
+    for item in finding_summary:
+
+        event_type = item.get(
+            "event_type"
+        )
+
+
+        if not event_type:
+
+            continue
+
+
+        rule = get_rule(
+            event_type
+        )
+
+
+        if rule is None:
+
+            continue
+
+
+        base_score = int(
+            rule.get(
+                "base_score",
+                0,
+            )
+        )
+
+
+        affected_page_count = int(
+            item.get(
+                "affected_page_count",
+                0,
+            )
+        )
+
+
+        total_pages = int(
+            item.get(
+                "total_pages",
+                0,
+            )
+        )
+
+
+        coverage_percentage = float(
+            item.get(
+                "coverage_percentage",
+                0,
+            )
+        )
+
+
+        # ----------------------------------------------------
+        # BONUS DE PROPAGATION
+        # ----------------------------------------------------
+        #
+        # On n'additionne PAS le score pour chaque page.
+        # On ajoute seulement un petit bonus si la faiblesse
+        # est largement répandue.
+        # ----------------------------------------------------
+
+        propagation_bonus = 0
+
+
+        if (
+            total_pages > 0
+            and affected_page_count > 0
+        ):
+
+            if coverage_percentage >= 80:
+
+                propagation_bonus = 10
+
+            elif coverage_percentage >= 50:
+
+                propagation_bonus = 5
+
+            elif coverage_percentage >= 20:
+
+                propagation_bonus = 2
+
+
+        finding_score = (
+            base_score
+            + propagation_bonus
+        )
+
+
+        total_score += (
+            finding_score
+        )
+
+
+        contributors.append(
+            {
+                "event_type": (
+                    event_type
+                ),
+
+                "base_score": (
+                    base_score
+                ),
+
+                "propagation_bonus": (
+                    propagation_bonus
+                ),
+
+                "score": (
+                    finding_score
+                ),
+
+                "affected_page_count": (
+                    affected_page_count
+                ),
+
+                "total_pages": (
+                    total_pages
+                ),
+
+                "coverage_percentage": (
+                    coverage_percentage
+                ),
+            }
+        )
+
+
+    total_score = min(
+        total_score,
+        100,
+    )
+
+
+    if total_score >= 70:
+
+        risk_level = "CRITICAL"
+
+    elif total_score >= 50:
+
+        risk_level = "HIGH"
+
+    elif total_score >= 30:
+
+        risk_level = "MEDIUM"
+
+    else:
+
+        risk_level = "LOW"
+
+
+    contributors.sort(
+        key=lambda item: (
+            -item["score"],
+            item["event_type"],
+        )
+    )
+
+
+    return {
+        "score": total_score,
+        "level": risk_level,
+        "contributors": contributors,
+    }
