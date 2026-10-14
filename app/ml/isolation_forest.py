@@ -196,3 +196,27 @@ def preprocess_features(
 
     X = df_clean[feature_cols]
     return df_clean, X, feature_cols
+
+
+# ============================================================
+# 4. ENTRAÎNEMENT DE L'ISOLATION FOREST
+# ============================================================
+def train_model(
+    X: pd.DataFrame,
+    contamination: float = 0.03,
+    n_estimators: int = 150,
+    random_state: int = 42,
+) -> IsolationForest:
+    """Entraîne l'Isolation Forest sur la matrice de caractéristiques."""
+    print(
+        f"[+] Entraînement de l'Isolation Forest (arbres={n_estimators}, contamination={contamination})..."
+    )
+
+    model = IsolationForest(
+        n_estimators=n_estimators,
+        contamination=contamination,
+        random_state=random_state,
+        n_jobs=-1,
+    )
+    model.fit(X)
+    return model
