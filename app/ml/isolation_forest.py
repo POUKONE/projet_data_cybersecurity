@@ -220,3 +220,118 @@ def train_model(
     )
     model.fit(X)
     return model
+
+
+# ============================================================
+# 5. ÉVALUATION ET TEST DU MODÈLE
+# ============================================================
+def evaluate_model(
+    model: IsolationForest,
+    X: pd.DataFrame,
+    df_original: pd.DataFrame,
+    ground_truth_col: str = None,
+) -> pd.DataFrame:
+    """Calcule les prédictions, les scores d'anomalie et évalue les performances."""
+    df_results = df_original.copy()
+
+    # Prédictions : 1 = normal, -1 = anomalie
+    predictions = model.predict(X)
+    df_results["is_anomaly"] = predictions
+
+    # Score de décision brut (plus il est négatif, plus c'est une anomalie)
+    raw_scores = model.decision_function(X)
+    df_results["raw_anomaly_score"] = raw_scores
+
+    # Normalisation du score de risque sur une échelle 0 - 100 pour le Risk Scoring
+    # (Un score proche de 100 signifie une anomalie très critique)
+    min_s, max_s = raw_scores.min(), raw_scores.max()
+    if max_s != min_s:
+        # Inversion : score brut faible -> risque élevé
+        df_results["risk_score_ml"] = np.round(
+            (1.0 - (raw_scores - min_s) / (max_s - min_s)) * 100, 2
+        )
+    else:
+        df_results["risk_score_ml"] = 50.0
+
+    nb_anomalies = (df_results["is_anomaly"] == -1).sum()
+    nb_normaux = (df_results["is_anomaly"] == 1).sum()
+    print(f"\n[+] Résultats de détection :")
+    print(f"    - Événements normaux : {nb_normaux}")
+    print(f"    - Anomalies détectées : {nb_anomalies}")
+
+    # Si le dataset possède une vérité terrain (ex: Kaggle avec colonne 'label' ou 'attack')
+    if ground_truth_col and ground_truth_col in df_original.columns:
+        print(f"\n[+] Évaluation avec la vérité terrain ({ground_truth_col}) :")
+
+        # Conversion du label Kaggle en format binaire (-1: attaque, 1: normal)
+        y_true = df_original[ground_truth_col].apply(
+            lambda x: (
+                -1
+                if str(x).lower()
+                in ["1", "attack", "anomaly", "malicious", "true"]
+                else 1
+            )
+        )
+
+        print(
+            confusion_matrix(
+                y_true, predictions, labels=[1, -1]
+            )
+        )
+        print(
+            classification_report(
+                y_true,
+                predictions,
+                labels=[1, -1],
+                target_names=["Normal", "Anomalie"],
+            )
+        )
+
+        # Calcul spécifique du taux de faux positifs (FPR)
+        tn, fp, fn, tp = confusion_matrix(
+            y_true == -1, predictions == -1
+        ).ravel()
+        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+        print(f"    - Taux de Faux Positifs (FPR) : {fpr:.2%}")
+
+    return df_results
+
+
+# ============================================================
+# 6. PIPELINE PRINCIPAL (RUNNER)
+# ============================================================
+def run_pipeline(
+    source_type: str = "sqlite",
+    data_path: str = "data/processed/security_project.db",
+    ground_truth_col: str = None,
+    export_model_path: str = "models/isolation_forest.joblib",
+    contamination: float = 0.03,
+):
+    """Orchestre l'ensemble du workflow ML."""
+    # 1. Chargement
+    df = load_data(source_type=source_type, path=data_path)
+    if df.empty:
+        print("[!] Arrêt du pipeline : aucune donnée à traiter.")
+        return None, None
+
+    # 2. Prétraitement
+    df_clean, X, feature_cols = preprocess_features(df)
+
+    # 3. Entraînement
+    model = train_model(X, contamination=contamination)
+
+    # 4. Évaluation
+    df_results = evaluate_model(
+        model, X, df_clean, ground_truth_col=ground_truth_col
+    )
+
+    # 5. Sauvegarde du modèle et de la liste des features
+    save_path = Path(export_model_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(
+        {"model": model, "feature_names": feature_cols},
+        save_path,
+    )
+    print(f"[+] Modèle et métadonnées sauvegardés sous : {save_path}")
+
+    return model, df_results
