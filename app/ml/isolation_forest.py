@@ -161,3 +161,38 @@ def aggregate_sqlite_tables(
 
     df_result = pd.DataFrame(list(features_per_ip.values()))
     return df_result
+
+
+# ============================================================
+# 3. NETTOYAGE ET SÉLECTION DES FEATURES
+# ============================================================
+def preprocess_features(
+    df: pd.DataFrame, feature_cols: list[str] = None
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """Nettoie le DataFrame, gère les valeurs nulles et extrait la matrice X."""
+    df_clean = df.copy()
+
+    # Si aucune colonne spécifiée, on prend automatiquement toutes les colonnes numériques
+    if feature_cols is None:
+        numeric_cols = df_clean.select_dtypes(
+            include=[np.number]
+        ).columns.tolist()
+        # On exclut les identifiants techniques
+        feature_cols = [
+            c
+            for c in numeric_cols
+            if c.lower() not in ["id", "scan_id", "label", "is_anomaly", "class"]
+        ]
+
+    print(f"[+] Variables sélectionnées pour le modèle : {feature_cols}")
+
+    # Imputation des valeurs nulles par 0 (standard pour des compteurs et métriques réseau)
+    df_clean[feature_cols] = df_clean[feature_cols].fillna(0)
+
+    # Suppression des valeurs infinies éventuelles
+    df_clean[feature_cols] = df_clean[feature_cols].replace(
+        [np.inf, -np.inf], 0
+    )
+
+    X = df_clean[feature_cols]
+    return df_clean, X, feature_cols
